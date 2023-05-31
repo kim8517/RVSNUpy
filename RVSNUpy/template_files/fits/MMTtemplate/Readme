@@ -1,0 +1,54 @@
+These are templates we use with our low-dispersion spectrographs,
+FAST and Hectospec.  ztemp dates from the old Z-Machine reticon
+spectrograph.  Spectra beginning with "f" were made for FAST; spectra
+beginning with "h" were made for Hectospec.  All of the "em" templates
+were synthesized using the IRAF rvsao.linespec task.  All spectra are
+linear with the dispersion in Angstroms per pixel given in the last
+column.  Because of the importance of preserving shape in emission
+lines when they are being rebinned for cross-correlation, the synthetic
+emission line spectra are over-resolved.  Bin them to your standard
+range using rvsao.sumspec to save time if cross-correlating lots of
+spectra with the same dispersion, remembering that if the redshifts
+vary and you iterate (re-rebin) to get the best template range match,
+you will still want the high resolution templates
+
+               File name  npix  start wl  end wl     wl/pix
+                 EA.fits  4505  2979.2073 7330.7851  0.9662
+             eatemp.fits  4505  2979.2073 7000.0000  0.8927
+             eltemp.fits  4505  2979.2939 7330.9983  0.9662
+           f86btemp.fits  1850  3670.6422 6369.0543  1.4669
+          f86btemp0.fits  2564  3670.6422 7411.0588  1.4669
+          fabtemp97.fits  2000  3800.0000 6700.0000  1.4507
+          fallstars.fits  4096  3689.7808 7479.2855  0.9280
+            femtemp.fits 20001  3000.0000 8000.0000  0.2500
+          femtemp97.fits 10001  3000.0000 8000.0000  0.5000
+          femtemphe.fits 20001  3000.0000 8000.0000  0.2500
+           fglotemp.fits  4096  3701.8201 7503.6894  0.9280
+           fm32temp.fits  4096  3702.3440 7504.7513  0.9280
+        fn4486btemp.fits  4096  3681.4059 7462.3092  0.9280
+         fn5548temp.fits  4096  3639.4821 7180.5998  0.8791
+         fn7331temp.fits  4096  3690.1908 7480.1166  0.9280
+            fs2temp.fits  4096  3700.1500 7500.3040  0.9280
+           fztemp97.fits  2000  3800.0000 6700.0000  1.4507
+           habtemp0.fits  4000  3001.0000 7000.0000  1.0000
+          habtemp90.fits  4000  2884.1547 7037.3375  1.3503
+         hemtemp0.0.fits 14402  2000.0000 9200.5000  0.5000
+         hemtemp0.5.fits 14402  1333.3333 6133.6667  0.5000
+           hemtemp0.fits 16002  2000.0000 10000.5000  0.5000
+          hkabstemp.fits 40000  3500.0000 7499.9000  0.1000
+         m31_a_temp.fits  4000  3700.0000 7000.0000  0.8252
+         m31_f_temp.fits  4000  3700.0000 7000.0000  0.8252
+         m31_k_temp.fits  4000  3700.0000 7000.0000  0.8252
+           sdss_qso.fits  7755   800.5000 8554.5000  1.0000
+             sptemp.fits  4505  2984.0241 7379.4109  0.9759
+              ztemp.fits  2048  4500.0050 6500.0072  0.9770
+
+
+These high-dispersion templates were made for the SAO reticon
+echelle spectrographs:
+
+               File name  npix  start wl  end wl     wl/pix
+                ax1.fits  2048  5163.4570 5209.7000  0.0226
+                mx1.fits  2048  5163.4570 5209.7000  0.0226
+                sx1.fits  2048  5163.4570 5209.7000  0.0226
+
