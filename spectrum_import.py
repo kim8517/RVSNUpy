@@ -1,3 +1,5 @@
+import sys
+sys.path.insert(0,'../')
 import numpy as np
 from astropy.io import fits
 from matplotlib import pyplot as plt
@@ -72,7 +74,7 @@ def sdss_fits(file, dr=14, plotting=False):
         
     return spectrum
 
-def MMT_fits(file, plotting=False):
+def MMT_raw(file, plotting=False):
     '''
     Parameters
     ----------
@@ -120,4 +122,30 @@ def MMT_fits(file, plotting=False):
         plt.ylabel('Flux (\'erg cm-2 s-1 AA-1\')')
         plt.show()
     
+    return spectrum
+
+def MMT_flux(file):
+    f = fits.open(file)
+    header = f[0].header
+    flux = (f[0].data)[0]
+    uncertainty = ((f[0].data)[1])
+    uncertainty = (1/np.sqrt(uncertainty))
+    
+    sz = len(flux)
+    crval = header['CRVAL1']
+    
+    if 'CDELT1' in header:
+        cdelt = header['CDELT1']
+    
+    else:
+        cdelt = header['CD1_1']
+        
+    crpix = header['CRPIX1']
+        
+    wavelength = (np.arange(sz) - crpix + 1)*cdelt+crval
+    wavelength = wavelength
+        
+    mask = np.zeros(len(wavelength))
+        
+    spectrum = np.vstack([wavelength, flux, uncertainty, mask])
     return spectrum

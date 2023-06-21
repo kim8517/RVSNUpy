@@ -50,9 +50,9 @@ for i in range(0,10):
     flux = sdss_template_data[1]
     uncertainty = 1/np.sqrt(sdss_template_data[2])
     
-    flux = flux[(wavelength>4000) & (wavelength<8900)]
-    uncertainty = uncertainty[(wavelength>4000) &( wavelength<8900)]
-    wavelength = wavelength[(wavelength>4000) & (wavelength<8900)]
+    flux = flux[(wavelength>3800) & (wavelength<8900)]
+    uncertainty = uncertainty[(wavelength>3800) &( wavelength<8900)]
+    wavelength = wavelength[(wavelength>3800) & (wavelength<8900)]
     
     try:
         wavelength = wavelength/(1+float(sdss_template_header['Z']))
@@ -99,9 +99,9 @@ for i in range(10,23):
     flux = sdss_template_data[0]
     uncertainty = 1/np.sqrt(sdss_template_data[2])
     
-    flux = flux[(wavelength>4000) & (wavelength<8900)]
-    uncertainty = uncertainty[(wavelength>4000) &( wavelength<8900)]
-    wavelength = wavelength[(wavelength>4000) & (wavelength<8900)]
+    flux = flux[(wavelength>3800) & (wavelength<8900)]
+    uncertainty = uncertainty[(wavelength>3800) &( wavelength<8900)]
+    wavelength = wavelength[(wavelength>3800) & (wavelength<8900)]
                 
     try:
         wavelength = wavelength/(1+float(sdss_template_header['Z']))
@@ -149,9 +149,9 @@ for i in range(23,29):
     flux = sdss_template_data[0]
     uncertainty = 1/np.sqrt(sdss_template_data[2])
     
-    flux = flux[(wavelength>4000) & (wavelength<8900)]
-    uncertainty = uncertainty[(wavelength>4000) &( wavelength<8900)]
-    wavelength = wavelength[(wavelength>4000) & (wavelength<8900)]
+    flux = flux[(wavelength>3800) & (wavelength<8900)]
+    uncertainty = uncertainty[(wavelength>3800) &( wavelength<8900)]
+    wavelength = wavelength[(wavelength>3800) & (wavelength<8900)]
                 
     try:
         wavelength = wavelength/(1+float(sdss_template_header['Z']))
@@ -168,7 +168,7 @@ for i in range(23,29):
     # fit to the correlation signal
     lag, corr,_ = template_correlate(template, template, template_type='nothing', hcutoff_scale=10,
                                   apodization_window=0.05, mask=None)
-    z, r, _, _,_,_,gaussian_fit, _, _, _, _ = z_finding(corr, lag, pkfrac = 0.55)
+    z, r, _, _,_,_,gaussian_fit, _, _, _, _ = z_finding(corr, lag, pkfrac = 0.7)
     err_dispersion = (3/8)*2*np.sqrt(2*np.log(2))*gaussian_fit.stddev.value/(1+r)
     
     # save the template data
@@ -282,7 +282,7 @@ for name in template_name:
     # measure the dispersion of template (refer z_finding in RVM)
     lag, corr,_ = template_correlate(template, template, template_type='nothing', hcutoff_scale=10,
                                   apodization_window=0.05, mask=None)
-    z, r, _, _,_,_,gaussian_fit, _, _, _, _ = z_finding(corr, lag, pkfrac = 0.55)
+    z, r, _, _,_,_,gaussian_fit, _, _, _, _ = z_finding(corr, lag, pkfrac = 0.7)
     err_dispersion = (3/8)*2*np.sqrt(2*np.log(2))*gaussian_fit.stddev.value/(1+r)
     
     # save the template data

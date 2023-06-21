@@ -1,3 +1,5 @@
+import sys
+sys.path.insert(0,'../')
 import glob
 import numpy as np
 import copy
