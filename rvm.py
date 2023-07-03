@@ -54,7 +54,50 @@ def z_finding(corr, lag, pkfrac, template_dispersion = [0,0], correlation_range=
         peak = _corr[i_peak] # estimates a peak
         lag_peak = _lag[i_peak]
         corr_fit, lag_fit = corr[corr >= pkfrac*peak], lag[corr >= pkfrac*peak] # select points >pkfrac*peak
-        if np.nanmax(lag_fit[1:]-lag_fit[:-1]) > 500:
+                
+        if np.nanmax(lag_fit[1:]-lag_fit[:-1]) < 500:
+            center = lag[np.nanargmax(corr_fit)]
+            c2 = (peak - peak*pkfrac)/(center-lag_fit[0])**2
+            c1= 2*c2*center
+            c0 = peak + (c1**2)/(4*c2)
+            # fit with the parabola
+            parabol = models.Polynomial1D(2, c2=c2, c1=c1, c0=c0)
+            fit = fitting.LevMarLSQFitter()
+            fit_parabol = fit(parabol, lag_fit, corr_fit)
+            fitted_center = -fit_parabol.c1/(2*fit_parabol.c2) # find the center
+            if fit_parabol.c2 > 0 or fitted_center<correlation_range[0] or fitted_center>correlation_range[1]:
+                z, r, error, dispersion, dispersion_err, fit_parabol, fit_gaussian, lag_fit, npeak, nrange, result  = \
+                    np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, 'Parabol is not convex'
+            else:
+                h = fit_parabol(fitted_center) # find the peak
+                z = fitted_center/c # estimate the redshift
+                # calculate sigma^2 abd r
+                npeak = np.abs(lag-fitted_center).argmin() # find an index of peak
+                N = int(2e+5/(lag[npeak]-lag[npeak-1]))
+                left, right = max(npeak-N,0), min(npeak+N, len(corr))
+                nrange = int(min(npeak-left, right-npeak))
+                corr_left, corr_right = corr[npeak-nrange:npeak], np.flip(corr[npeak:npeak+nrange])
+                sigma = np.sum(((corr_left - corr_right)**2))/nrange
+                r = peak/(np.sqrt(sigma))
+                # measure fwhm and estimate the error((3/8)*(w/1+r))
+                fwhm = 2*np.sqrt(-h/(2*fit_parabol.c2))
+                gaussian = models.Gaussian1D(amplitude=h, mean=fitted_center, stddev=fwhm/(2*np.sqrt(2*np.log(2))))
+                try:
+                    fit_gaussian = fit(gaussian, lag_fit, corr_fit)
+                except:
+                    print(h, fitted_center, fwhm)
+                    fit_gaussian = fit(gaussian, lag_fit, corr_fit)
+                fwhm = 2*np.sqrt(2*np.log(2))*fit_gaussian.stddev.value
+                error_vel = (3/8)*fwhm/(1+r)
+                # convert the error of the velocity to the redshift
+                error = error_vel/c
+                dispersion = np.sqrt(fit_gaussian.stddev.value**2-2*template_dispersion[0]**2)
+                dispersion_err = np.sqrt(2*np.sqrt(fit_gaussian.stddev.value**2*error_vel**2
+                                                   +4*template_dispersion[0]**2*template_dispersion[1]**2
+                                                   +dispersion**4)-2*dispersion**2)
+                result = 'Well fitted'
+                
+        elif len(np.where((lag_fit[1:]-lag_fit[:-1]) > 500)[0]) == 1:
             fit_condition = (corr > pkfrac*peak) & (np.abs(lag-lag_peak)<500)
             corr_fit, lag_fit = corr[fit_condition], lag[fit_condition]
             center = lag[np.nanargmax(corr_fit)]
@@ -97,9 +140,13 @@ def z_finding(corr, lag, pkfrac, template_dispersion = [0,0], correlation_range=
                 dispersion_err = np.sqrt(2*np.sqrt(fit_gaussian.stddev.value**2*error_vel**2
                                                    +4*template_dispersion[0]**2*template_dispersion[1]**2
                                                    +dispersion**4)-2*dispersion**2)
-                result = 'Separated peak'
+                result = 'One separated peak'
+                
         else:
+            fit_condition = (corr > pkfrac*peak) & (np.abs(lag-lag_peak)<500)
+            corr_fit, lag_fit = corr[fit_condition], lag[fit_condition]
             center = lag[np.nanargmax(corr_fit)]
+            ####### This must be revsied to be more efficiently
             c2 = (peak - peak*pkfrac)/(center-lag_fit[0])**2
             c1= 2*c2*center
             c0 = peak + (c1**2)/(4*c2)
@@ -138,7 +185,7 @@ def z_finding(corr, lag, pkfrac, template_dispersion = [0,0], correlation_range=
                 dispersion_err = np.sqrt(2*np.sqrt(fit_gaussian.stddev.value**2*error_vel**2
                                                    +4*template_dispersion[0]**2*template_dispersion[1]**2
                                                    +dispersion**4)-2*dispersion**2)
-                result = 'Well fitted'
+                result = 'Separated peaks'
     except:
         z, r, error, dispersion, dispersion_err, fit_parabol, fit_gaussian, lag_fit, npeak, nrange, result  = \
                 np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, 'Fitting failed'
@@ -191,8 +238,15 @@ class rvm:
                                                                               mask = self.mask)
                 z[i], r[i], error[i],_,_,_,_,_,_,_,result = z_finding(corr, lag, pkfrac = temp[1], template_dispersion=temp[3],
                                                                   correlation_range=self.correlation_range)
-                if result == 'Separated peak':
-                    flag[i] = '1'
+                if result == 'Well fitted':
+                    flag[i] = 0
+                elif result == 'One separated peak':
+                    flag[i] = 1
+                elif result == 'Separated peaks':
+                    flag[i] = 2
+                else:
+                    flag[i] = 99
+                    
             return template_name, z, r, error, flag
         
         result = np.hstack(Parallel(n_jobs=4, verbose=0)(delayed(_redshift)(temp_names) for temp_names in parallel_section))
@@ -445,7 +499,7 @@ def multi_rvm(spectrums, template, vel_disp=False, progress=False, **kwargs):
                 Error[i] = np.nan
                 Dispersion[i] = np.nan
                 Dispersion_err[i] = np.nan
-                Flag[i] = 3
+                Flag[i] = 99
 
             if Error[i] < 1e-5:
                 Z[i] = np.round(Z[i], 6)

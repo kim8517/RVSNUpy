@@ -111,6 +111,7 @@ def template_correlate(observed_spectrum, template_spectrum, template_type, hcut
     # masking
     observed_log_spectrum[1,:][observed_log_spectrum[3,:].astype(bool)] = 0
     observed_log_spectrum[2,:][observed_log_spectrum[3,:].astype(bool)] = 0
+    
     if mask != None:
         masked_indices = []
         for i in range(len(mask)):
