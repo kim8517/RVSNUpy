@@ -13,7 +13,7 @@ def median_filter(flux, I, window, sigma):
         continuum_flux[i] = np.ma.median(_window)
     return continuum_flux
 
-def continuum_finding(spectrum, sigma=3, window = 35, plotting = False):
+def continuum_finding(spectrum, sigma=3, window = 90, plotting = False):
     '''
 
     Parameters
@@ -32,6 +32,8 @@ def continuum_finding(spectrum, sigma=3, window = 35, plotting = False):
     continuum : 3xn array
     
     '''
+    window = int(window/np.median(spectrum[0,1:]-spectrum[0,:-1])) # change wavelength to the array size
+    
     flux = spectrum[1,:]
     flux_length = len(flux) 
     # create the continuum_flux by running median
@@ -51,7 +53,7 @@ def continuum_finding(spectrum, sigma=3, window = 35, plotting = False):
         plt.show()
     return continuum
 
-def continuum_subtraction(spectrum, sigma=3, window = 35, plotting = False):
+def continuum_subtraction(spectrum, sigma=3, window = 90, plotting = False):
     '''
 
     Parameters

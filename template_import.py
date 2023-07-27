@@ -67,7 +67,7 @@ for i in range(0,10):
 
     # measure the dispersion of template (refer z_finding in RVM)
     # fit to the correlation signal
-    lag, corr,_ = template_correlate(template, template, template_type='nothing', hcutoff_scale=10,
+    lag, corr,_ = template_correlate(template, template, template_type='nothing', hcutoff_scale=0,
                                   apodization_window=0.05, mask=None)
     z, r, _, _,_,_,gaussian_fit, _, _, _, _ = z_finding(corr, lag, pkfrac = 0.55)
     err_dispersion = (3/8)*2*np.sqrt(2*np.log(2))*gaussian_fit.stddev.value/(1+r)
@@ -116,7 +116,7 @@ for i in range(10,23):
 
     # measure the dispersion of template (refer z_finding in RVM)
     # fit to the correlation signal
-    lag, corr,_ = template_correlate(template, template, template_type='nothing', hcutoff_scale=10,
+    lag, corr,_ = template_correlate(template, template, template_type='nothing', hcutoff_scale=0,
                                   apodization_window=0.05, mask=None)
     z, r, _, _,_,_,gaussian_fit, _, _, _, _ = z_finding(corr, lag, pkfrac = 0.55)
     err_dispersion = (3/8)*2*np.sqrt(2*np.log(2))*gaussian_fit.stddev.value/(1+r)
@@ -166,7 +166,7 @@ for i in range(23,29):
 
     # measure the dispersion of template (refer z_finding in RVM)
     # fit to the correlation signal
-    lag, corr,_ = template_correlate(template, template, template_type='nothing', hcutoff_scale=10,
+    lag, corr,_ = template_correlate(template, template, template_type='nothing', hcutoff_scale=0,
                                   apodization_window=0.05, mask=None)
     z, r, _, _,_,_,gaussian_fit, _, _, _, _ = z_finding(corr, lag, pkfrac = 0.7)
     err_dispersion = (3/8)*2*np.sqrt(2*np.log(2))*gaussian_fit.stddev.value/(1+r)
@@ -226,7 +226,7 @@ for i in range(29,33):
 
     # measure the dispersion of template (refer z_finding in RVM)
     # fit to the correlation signal
-    lag, corr,_ = template_correlate(template, template, template_type='nothing', hcutoff_scale=10,
+    lag, corr,_ = template_correlate(template, template, template_type='nothing', hcutoff_scale=0,
                                   apodization_window=0.05, mask=None)
     z, r, _, _,_,_,gaussian_fit, _, _, _, _ = z_finding(corr, lag, pkfrac = 0.55)
     err_dispersion = (3/8)*2*np.sqrt(2*np.log(2))*gaussian_fit.stddev.value/(1+r)
@@ -280,7 +280,7 @@ for name in template_name:
     template = continuum.continuum_subtraction(template, window=35)
     
     # measure the dispersion of template (refer z_finding in RVM)
-    lag, corr,_ = template_correlate(template, template, template_type='nothing', hcutoff_scale=10,
+    lag, corr,_ = template_correlate(template, template, template_type='nothing', hcutoff_scale=0,
                                   apodization_window=0.05, mask=None)
     z, r, _, _,_,_,gaussian_fit, _, _, _, _ = z_finding(corr, lag, pkfrac = 0.7)
     err_dispersion = (3/8)*2*np.sqrt(2*np.log(2))*gaussian_fit.stddev.value/(1+r)

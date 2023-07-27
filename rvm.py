@@ -17,7 +17,7 @@ c = c.value/1e+3
 
 warnings.filterwarnings("ignore") # ignore warning
 
-def z_finding(corr, lag, pkfrac, template_dispersion = [0,0], correlation_range=[-0.01,2]):
+def z_finding(corr, lag, pkfrac=0.65, template_dispersion = [0,0], correlation_range=[-0.01,2]):
     '''
 
     Parameters
@@ -91,56 +91,11 @@ def z_finding(corr, lag, pkfrac, template_dispersion = [0,0], correlation_range=
                 error_vel = (3/8)*fwhm/(1+r)
                 # convert the error of the velocity to the redshift
                 error = error_vel/c
-                dispersion = np.sqrt(fit_gaussian.stddev.value**2-2*template_dispersion[0]**2)
+                dispersion = np.sqrt(fit_gaussian.stddev.value**2-template_dispersion[0]**2)
                 dispersion_err = np.sqrt(2*np.sqrt(fit_gaussian.stddev.value**2*error_vel**2
-                                                   +4*template_dispersion[0]**2*template_dispersion[1]**2
-                                                   +dispersion**4)-2*dispersion**2)
+                                                   +template_dispersion[0]**2*template_dispersion[1]**2
+                                                   +0.25*dispersion**4)-dispersion**2)
                 result = 'Well fitted'
-                
-        elif len(np.where((lag_fit[1:]-lag_fit[:-1]) > 500)[0]) == 1:
-            fit_condition = (corr > pkfrac*peak) & (np.abs(lag-lag_peak)<500)
-            corr_fit, lag_fit = corr[fit_condition], lag[fit_condition]
-            center = lag[np.nanargmax(corr_fit)]
-            ####### This must be revsied to be more efficiently
-            c2 = (peak - peak*pkfrac)/(center-lag_fit[0])**2
-            c1= 2*c2*center
-            c0 = peak + (c1**2)/(4*c2)
-            # fit with the parabola
-            parabol = models.Polynomial1D(2, c2=c2, c1=c1, c0=c0)
-            fit = fitting.LevMarLSQFitter()
-            fit_parabol = fit(parabol, lag_fit, corr_fit)
-            fitted_center = -fit_parabol.c1/(2*fit_parabol.c2) # find the center
-            if fit_parabol.c2 > 0 or fitted_center<correlation_range[0] or fitted_center>correlation_range[1]:
-                z, r, error, dispersion, dispersion_err, fit_parabol, fit_gaussian, lag_fit, npeak, nrange, result  = \
-                    np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, 'Parabol is not convex'
-            else:
-                h = fit_parabol(fitted_center) # find the peak
-                z = fitted_center/c # estimate the redshift
-                # calculate sigma^2 abd r
-                npeak = np.abs(lag-fitted_center).argmin() # find an index of peak
-                N = int(2e+5/(lag[npeak]-lag[npeak-1]))
-                left, right = max(npeak-N,0), min(npeak+N, len(corr))
-                nrange = int(min(npeak-left, right-npeak))
-                corr_left, corr_right = corr[npeak-nrange:npeak], np.flip(corr[npeak:npeak+nrange])
-                sigma = np.sum(((corr_left - corr_right)**2))/nrange
-                r = peak/(np.sqrt(sigma))
-                # measure fwhm and estimate the error((3/8)*(w/1+r))
-                fwhm = 2*np.sqrt(-h/(2*fit_parabol.c2))
-                gaussian = models.Gaussian1D(amplitude=h, mean=fitted_center, stddev=fwhm/(2*np.sqrt(2*np.log(2))))
-                try:
-                    fit_gaussian = fit(gaussian, lag_fit, corr_fit)
-                except:
-                    print(h, fitted_center, fwhm)
-                    fit_gaussian = fit(gaussian, lag_fit, corr_fit)
-                fwhm = 2*np.sqrt(2*np.log(2))*fit_gaussian.stddev.value
-                error_vel = (3/8)*fwhm/(1+r)
-                # convert the error of the velocity to the redshift
-                error = error_vel/c
-                dispersion = np.sqrt(fit_gaussian.stddev.value**2-2*template_dispersion[0]**2)
-                dispersion_err = np.sqrt(2*np.sqrt(fit_gaussian.stddev.value**2*error_vel**2
-                                                   +4*template_dispersion[0]**2*template_dispersion[1]**2
-                                                   +dispersion**4)-2*dispersion**2)
-                result = 'One separated peak'
                 
         else:
             fit_condition = (corr > pkfrac*peak) & (np.abs(lag-lag_peak)<500)
@@ -181,10 +136,10 @@ def z_finding(corr, lag, pkfrac, template_dispersion = [0,0], correlation_range=
                 error_vel = (3/8)*fwhm/(1+r)
                 # convert the error of the velocity to the redshift
                 error = error_vel/c
-                dispersion = np.sqrt(fit_gaussian.stddev.value**2-2*template_dispersion[0]**2)
+                dispersion = np.sqrt(fit_gaussian.stddev.value**2-template_dispersion[0]**2)
                 dispersion_err = np.sqrt(2*np.sqrt(fit_gaussian.stddev.value**2*error_vel**2
-                                                   +4*template_dispersion[0]**2*template_dispersion[1]**2
-                                                   +dispersion**4)-2*dispersion**2)
+                                                   +template_dispersion[0]**2*template_dispersion[1]**2
+                                                   +0.25*dispersion**4)-dispersion**2)
                 result = 'Separated peaks'
     except:
         z, r, error, dispersion, dispersion_err, fit_parabol, fit_gaussian, lag_fit, npeak, nrange, result  = \
@@ -195,19 +150,17 @@ def z_finding(corr, lag, pkfrac, template_dispersion = [0,0], correlation_range=
 
 
 class rvm:
-    def __init__(self, spectrum, templates, hcutoff_scale=10, apodization_window = 0.05, spectrum_range=None, 
-        template_range=None, 
-        correlation_range=[-0.01,2], mask = None, continuum_subtraction = True, 
-        window = 100, sigma =3): 
+    def __init__(self, spectrum, templates, star_templates=None, clipping=False, hcutoff_scale=10, apodization_window = 0.05, 
+                 spectrum_range=None, template_range=None, correlation_range=[-0.01,2], mask = None,
+                 continuum_subtraction = True, window = 80, sigma =3): 
         
-        self.spectrum, self.templates = spectrum, templates
-        self.hcutoff_scale, self.apdoization_window = hcutoff_scale, apodization_window
+        self.spectrum, self.templates, self.star_templates = spectrum, templates, star_templates
+        self.clipping, self.hcutoff_scale, self.apdoization_window = clipping, hcutoff_scale, apodization_window
         self.spectrum_range, self.template_range, self.correlation_range = spectrum_range, template_range, correlation_range
         self.mask = mask
         self.window, self.sigma = window, sigma
         
         if continuum_subtraction:
-            self.window = int(np.nanmedian(self.spectrum[0,1:]-self.spectrum[0,:-1])*window/1.2)
             self.subt_spectrum = continuum.continuum_subtraction(self.spectrum, window=self.window, sigma=self.sigma)
         else:
             self.subt_spectrum = copy.deepcopy(self.spectrum)
@@ -232,18 +185,15 @@ class rvm:
                 template_name[i], temp = temp_name, copy.deepcopy(self.templates[temp_name])
                 if self.template_range != None:
                     temp = temp[:,(temp[0,:]>self.template_range[0])&((temp[0,:]<self.template_range[1]))]
-                lag, corr, _ = correlation.template_correlate(self.subt_spectrum, temp[0], template_type=temp[2],
-                                                                              hcutoff_scale=self.hcutoff_scale,
-                                                                              apodization_window = self.apdoization_window,
-                                                                              mask = self.mask)
+                lag, corr, _ = correlation.template_correlate(self.subt_spectrum, temp[0], template_type=temp[2], 
+                                                              clipping=self.clipping, hcutoff_scale=self.hcutoff_scale, 
+                                                              apodization_window = self.apdoization_window, mask = self.mask)
                 z[i], r[i], error[i],_,_,_,_,_,_,_,result = z_finding(corr, lag, pkfrac = temp[1], template_dispersion=temp[3],
                                                                   correlation_range=self.correlation_range)
                 if result == 'Well fitted':
                     flag[i] = 0
-                elif result == 'One separated peak':
-                    flag[i] = 1
                 elif result == 'Separated peaks':
-                    flag[i] = 2
+                    flag[i] = 1
                 else:
                     flag[i] = 99
                     
@@ -335,62 +285,66 @@ class rvm:
             
         return lag, corr, resampled_spectrum
     
-    def vd_best(self):
-        if len(self.z)==0:
-            self.dispersion, self.dispersion_error = np.nan, np.nan
-        else:
-            self.rest_spectrum = copy.deepcopy(self.subt_spectrum)
-            self.rest_spectrum[0,:] = self.subt_spectrum[0,:]/(1+self.z[0])
-            temp = copy.deepcopy(self.templates[self.template_name[0]])
-            if self.template_range != None:
-                temp = temp[:,(temp[0,:]>self.template_range[0])&((temp[0,:]<self.template_range[1]))]
-            lag, corr, observed_spectrum = correlation.template_correlate(self.rest_spectrum, temp[0], template_type=temp[2],
-                                                                            hcutoff_scale=self.hcutoff_scale,
-                                                                            apodization_window = self.apdoization_window,
-                                                                            mask = self.mask)
-            _,_,_, self.dispersion, self.dispersion_error,_,_,_,_,_,_ = z_finding(corr, lag, pkfrac = temp[1], template_dispersion=temp[3],
-                                                                correlation_range=self.correlation_range)
-        return self.dispersion, self.dispersion_error
-    
-    def vd_all(self):
+    def vd(self):
         self.rest_spectrum = copy.deepcopy(self.subt_spectrum)
-        self.rest_spectrum[0,:] = self.subt_spectrum[0,:]/(1+self.z[0])
         
-        n_divide = len(self.template_name)//4
-        parallel_section = [self.template_name[:n_divide],self.template_name[n_divide:2*n_divide],
-                            self.template_name[2*n_divide:3*n_divide], self.template_name[3*n_divide:]]
+        template_list = list(self.star_templates.keys())
+        n_divide = len(template_list)//4
+        parallel_section = [template_list[:n_divide],template_list[n_divide:2*n_divide],
+                            template_list[2*n_divide:3*n_divide], template_list[3*n_divide:]]
         
         if len(self.z) == 0:
-            dispersion, dispersion_error = np.zeros(n_divide)*np.nan, np.zeros(n_divide)*np.nan
+            template_name, r, dispersion, dispersion_error, flag = np.zeros(n_divide).astype(str), np.zeros(n_divide)*np.nan, np.zeros(n_divide)*np.nan, np.zeros(n_divide)*np.nan, 99*np.ones(n_divide).astype(int)
         else:
-            def _vd_all(temp_names):
-                n_template = len(self.template_name)
+            self.rest_spectrum[0,:] = self.subt_spectrum[0,:]/(1+self.z[0])
+            def _vd(temp_names):
+                n_template = len(temp_names)
+                template_name = np.zeros(n_template, dtype='<U32')
+                r = np.zeros(n_template).astype(float)
                 dispersion = np.zeros(n_template)
                 dispersion_error = np.zeros(n_template)
-                error = np.zeros(n_template)
-                for i, temp_name in enumerate(self.template_name):
-                    temp = copy.deepcopy(self.templates[temp_name])
+                flag = np.zeros(n_template).astype(int)
+                for i, temp_name in enumerate(temp_names):
+                    template_name[i], temp = temp_name, copy.deepcopy(self.star_templates[temp_name])
                     if self.template_range != None:
                         temp = temp[:,(temp[0,:]>self.template_range[0])&((temp[0,:]<self.template_range[1]))]
                     lag, corr, observed_spectrum = correlation.template_correlate(self.rest_spectrum, temp[0], template_type=temp[2],
-                                                                                hcutoff_scale=self.hcutoff_scale,
+                                                                                hcutoff_scale=0,
                                                                                 apodization_window = self.apdoization_window,
                                                                                 mask = self.mask)
-                    _, _, _,dispersion[i],dispersion_error[i],_,_,_,_,_,_ = z_finding(corr, lag, pkfrac = temp[1], template_dispersion=temp[3],
+                    _, r[i], _,dispersion[i],dispersion_error[i],_,_,_,_,_,result = z_finding(corr, lag, pkfrac = temp[1], template_dispersion=temp[3],
                                                                     correlation_range=self.correlation_range)
-                return dispersion, dispersion_error
+                    
+                if result == 'Well fitted':
+                    flag[i] = 0
+                elif result == 'Separated peaks':
+                    flag[i] = 1
+                else:
+                    flag[i] = 99
+                    
+                return template_name, r, dispersion, dispersion_error, flag
         
         
-            result = np.array(Parallel(n_jobs=4, verbose=0)(delayed(_vd_all)(temp_names) for temp_names in parallel_section))
-            self.dispersion, self.dispersion_error = np.concatenate(result[:,0,:]), np.concatenate(result[:,1,:]).astype(float)
+            result = np.hstack(Parallel(n_jobs=4, verbose=0)(delayed(_vd)(temp_names) for temp_names in parallel_section))
+            star_template_name, r_disp, dispersion , dispersion_error, flag_disp = result[0], result[1].astype(float), result[2].astype(float), result[3].astype(float), result[4].astype(int)
+            
+        # eliminate np.nan in r and error
+        nan = np.ma.masked_invalid(r_disp).mask
+        star_template_name, r_disp, dispersion, dispersion_error, flag_disp = star_template_name[~nan], r_disp[~nan], dispersion[~nan], dispersion_error[~nan], flag_disp[~nan]
+        nan = np.ma.masked_invalid(dispersion_error).mask
+        star_template_name, r_disp, dispersion, dispersion_error, flag_disp = star_template_name[~nan], r_disp[~nan], dispersion[~nan], dispersion_error[~nan], flag_disp[~nan]
+        # arange the value in the order of R
+        order = np.flip(np.argsort(r_disp))
+        self.star_template_name = star_template_name[order]
+        self.r_disp = r_disp[order]
+        self.dispersion = dispersion[order]
+        self.dispersion_error = dispersion_error[order]
+        self.flag_disp = flag_disp[order]
     
-        table = np.vstack((self.template_name, self.z, self.r, self.error,
-                           self.dispersion, 
-                           self.dispersion_error, self.flag))
-        column_names = ['Template_name', 'Redshift', 'r-value', 'Error', 'Dispersion', 'Dispersion_error', 'Flag']
+        table = np.vstack((self.star_template_name, self.r_disp, self.dispersion, self.dispersion_error, self.flag_disp))
+        column_names = ['Template_name', 'r-value', 'Dispersion', 'Dispersion_error', 'Flag']
         df = pd.DataFrame(table.T, columns = column_names)
-        df = df.astype({'Template_name':str, 'Redshift':float, 'r-value':float, 'Error':float,
-                        'Dispersion':float, 'Dispersion_error':float, 'Flag':int})
+        df = df.astype({'Template_name':str, 'r-value':float, 'Dispersion':float, 'Dispersion_error':float, 'Flag':int})
         return df
     
     def cc_vd(self, index, plotting=False):
@@ -471,8 +425,9 @@ def multi_rvm(spectrums, template, vel_disp=False, progress=False, **kwargs):
             return x
     
     if vel_disp:
-        besttemp, Z, R, Error, Dispersion, Dispersion_err, Flag = np.zeros(len(spectrums), dtype='<U32'), np.zeros(len(spectrums)),\
-            np.zeros(len(spectrums)), np.zeros(len(spectrums)), np.zeros(len(spectrums)), np.zeros(len(spectrums)), np.zeros(len(spectrums)).astype(int)
+        besttemp, Z, R, Error, Flag, besttemp_vd, Dispersion, R_vd, Dispersion_error, Flag_vd = np.zeros(len(spectrums), dtype='<U32'), np.zeros(len(spectrums)),\
+        np.zeros(len(spectrums)), np.zeros(len(spectrums)), np.zeros(len(spectrums)).astype(int), \
+        np.zeros(len(spectrums), dtype='<U32'), np.zeros(len(spectrums)), np.zeros(len(spectrums)), np.zeros(len(spectrums)), np.zeros(len(spectrums)).astype(int)
     
         for i, spectrum in enumerate(pro(spectrums)):
             RVM = rvm(spectrum, template, **kwargs)
@@ -482,37 +437,46 @@ def multi_rvm(spectrums, template, vel_disp=False, progress=False, **kwargs):
             r = np.array(z_result['r-value'], dtype=float)
             error = np.array(z_result['Error'], dtype=float)
             flag = np.array(z_result['Flag'], dtype=str)
-            dispersion, dispersion_err = RVM.vd_best()
+            
+            vd_result = RVM.vd()
+            star_template_name = np.array(vd_result['Template_name'])
+            dispersion = np.array(vd_result['Dispersion'], dtype=float)
+            r_vd = np.array(vd_result['r-value'], dtype=float)
+            dispersion_error = np.array(vd_result['Dispersion_error'], dtype=float)
+            flag_vd = np.array(vd_result['Flag'], dtype=str)
             if len(redshift) >= 1:
                 besttemp[i] = template_name[0]
-                Z[i] = redshift[0]
+                Z[i] = np.round(redshift[0], 7)
                 R[i] = r[0]
-                Error[i] = float(error[0])
-                Dispersion[i] = dispersion
-                Dispersion_err[i] = dispersion_err
+                Error[i] = np.round(float(error[0]), 7)
                 Flag[i] = flag[0]
+                
+                besttemp_vd[i] = star_template_name[0]
+                Dispersion[i] = np.round(dispersion[0],0)
+                R_vd[i] = r_vd[0]
+                Dispersion_error[i] = np.round(dispersion_error[0],0)
+                Flag_vd[i] = flag_vd[0]
                 
             else:
                 besttemp[i] = np.nan
                 Z[i] = np.nan
                 R[i] = np.nan
                 Error[i] = np.nan
-                Dispersion[i] = np.nan
-                Dispersion_err[i] = np.nan
                 Flag[i] = 99
-
-            if Error[i] < 1e-5:
-                Z[i] = np.round(Z[i], 6)
-            else:
-                Z[i] = np.round(Z[i], 8)
+                
+                besttemp_vd[i] = np.nan
+                Dispersion[i] = np.nan
+                R_vd[i] = np.nan
+                Dispersion_error[i] = np.nan
+                Flag_vd[i] = np.nan
             
-            Error[i] = np.round(Error[i], 7)
         
-        table = np.vstack((besttemp, Z, R, Error, Dispersion, Dispersion_err, Flag))
-        column_names = ['Best_template', 'Redshift', 'r-value', 'Error', 'Dispersion', 'Dispersion_error', 'Flag']
+        table = np.vstack((besttemp, Z, R, Error, Flag, besttemp_vd, Dispersion, R_vd, Dispersion_error, Flag_vd))
+        column_names = ['Best_template', 'Redshift', 'r-value', 'Error', 'Flag', 'Best_template_disp', 'Dispersion', 'r-value_disp', 'Dispersion_error', 'Flag_disp']
         df = pd.DataFrame(table.T, columns = column_names)
-        df = df.astype({'Best_template':str, 'Redshift':float, 'r-value':float, 'Error':float,
-                        'Dispersion':float, 'Dispersion_error':float, 'Flag':int})
+        df = df.astype({'Best_template':str, 'Redshift':float, 'r-value':float, 'Error':float, 'Flag':int,
+                        'Best_template_disp':str, 'Dispersion':float, 'r-value_disp':float, 'Dispersion_error':float,
+                        'Flag_disp':int})
     
     else: 
         besttemp, Z, R, Error, Flag = np.zeros(len(spectrums), dtype='<U32'), np.zeros(len(spectrums)), np.zeros(len(spectrums)),\

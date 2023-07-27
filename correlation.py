@@ -7,8 +7,9 @@ from scipy.signal import butter,filtfilt
 from astropy.constants import c
 c = c.value/1e+3
 
-__all__ = ['template_correlate', 'template_logwl_resample']
+from scipy.interpolate import interp1d, InterpolatedUnivariateSpline
 
+__all__ = ['template_correlate', 'template_logwl_resample']
 
 def resampler(orig_spectrum, resample_lambda):
     """
@@ -37,8 +38,65 @@ def resampler(orig_spectrum, resample_lambda):
     
     return np.vstack([resample_lambda, new_flux, new_unc, new_mask])
 
+def interp(flux, region):
+    x = np.arange(len(flux))
+    y = np.ma.masked_array(flux, region)
 
-def template_correlate(observed_spectrum, template_spectrum, template_type, hcutoff_scale=10,
+    # Perform spline interpolation
+    interp_func = InterpolatedUnivariateSpline(x[~region], y[~region])
+#     interp_func = interp1d(x[~mask], y[~mask], kind='linear', fill_value='extrapolate')
+    interpolated_flux = interp_func(x)
+    return interpolated_flux
+
+def abs_supress(wavelength, flux, thres):
+    detection = flux < -1*thres
+    
+    # find the line center
+    lends, rends = np.where(np.diff(detection.astype(int)) == 1)[0] + 1, np.where(np.diff(detection.astype(int)) == -1)[0] + 1
+    if detection[-1] == True: # dectecion = (..., True, True, True)
+        rends = np.concatenate((rends, np.array([len(flux)-1])))
+    if detection[0] == True: # dectecion = (True, True, True, ...)
+        lends = np.concatenate((np.array([0]), lends))
+        
+    centers = (lends+rends) // 2
+    
+    # smoothly replace the lines with 0
+    region = np.zeros_like(flux).astype(bool)
+    width = int(24/np.median(wavelength[1:]-wavelength[:-1])) # 3x400 km/s at 6000 A
+    for lend, rend, center in zip(lends, rends, centers):
+        l,r = max(0, center-width), min(len(flux)-1, center+width)
+        window = 1-tukey(r-l+1, alpha=0.3)
+        flux[l:r+1] *= window
+        
+    return flux
+
+def emi_supress(wavelength, flux, thres):
+    detection = flux > thres
+    mask = np.zeros_like(flux).astype(bool)
+    flux[detection] = 0
+    
+    # find the line center
+    lends, rends = np.where(np.diff(detection.astype(int)) == 1)[0] + 1, np.where(np.diff(detection.astype(int)) == -1)[0] + 1
+    if detection[-1] == True: # dectecion = (..., True, True, True)
+        rends = np.concatenate((rends, np.array([len(flux)-1])))
+    if detection[0] == True: # dectecion = (True, True, True, ...)
+        lends = np.concatenate((np.array([0]), lends))
+        
+    centers = (lends+rends) // 2
+    
+    # smoothly replace the lines with 0
+    region = np.zeros_like(flux).astype(bool)
+    width = int(24/np.median(wavelength[1:]-wavelength[:-1])) # 3x400 km/s at 6000 A
+    for lend, rend, center in zip(lends, rends, centers):
+        l,r = max(0, center-width), min(len(flux)-1, center+width)
+        window = 1-tukey(r-l+1, alpha=0.3)
+        flux[l:r+1] *= window
+        
+    return flux
+    
+        
+
+def template_correlate2(observed_spectrum, template_spectrum, template_type, clipping=False, hcutoff_scale=10,
                        fs=1, order=2, apodization_window=0.05, mask = None):
     """
     Compute cross-correlation of the observed and template spectra.
@@ -77,10 +135,12 @@ def template_correlate(observed_spectrum, template_spectrum, template_type, hcut
     filtered_flux = _observed_spectrum[1,:]
     hcutoff = 1/(2*hcutoff_scale)
     if template_type == 'emission':
-        filtered_flux[filtered_flux>8*np.std(filtered_flux)] = 0
+        if clipping:
+            filtered_flux[filtered_flux>8*np.std(filtered_flux)] = 0
         filtered_flux[filtered_flux<-2*np.std(filtered_flux)] = 0
     elif template_type == 'absorption':
-        filtered_flux[filtered_flux<-5*np.std(filtered_flux)] = 0
+        if clipping:
+            filtered_flux[filtered_flux<-5*np.std(filtered_flux)] = 0
         filtered_flux = butter_highstop_filter(filtered_flux, hcutoff, fs, order)
         filtered_flux[filtered_flux>2*np.std(filtered_flux)] = 0
         
@@ -122,6 +182,115 @@ def template_correlate(observed_spectrum, template_spectrum, template_type, hcut
         masked_indices = np.concatenate(masked_indices)
         observed_log_spectrum[1,:][masked_indices] = 0
         observed_log_spectrum[2,:][masked_indices] = 0
+        
+    # Correlate
+    corr = np.correlate(observed_log_spectrum[1,:],
+                        (template_log_spectrum[1,:] * normalization),
+                        mode='full')/(np.linalg.norm(observed_log_spectrum[1,:])
+                                      *np.linalg.norm(template_log_spectrum[1,:]*normalization))
+                        
+    wave_l = observed_log_spectrum[0,:]
+
+    # Compute lag
+    # wave_l is the wavelength array equally spaced in log space.
+    wave_l = observed_log_spectrum[0,:]
+    delta_log_wave = np.log10(wave_l[1]) - np.log10(wave_l[0])
+    deltas = (np.array(range(len(corr))) - len(corr)/2 + 0.5) * delta_log_wave
+    lags = (np.power(10., deltas) - 1)*c
+
+    return lags, corr, observed_log_spectrum
+
+def template_correlate(observed_spectrum, template_spectrum, template_type, clipping=False, hcutoff_scale=10,
+                       fs=1, order=2, apodization_window=0.05, mask = None):
+    """
+    Compute cross-correlation of the observed and template spectra.
+
+
+    After re-sampling into log-wavelength, both observed and template
+    spectra are apodized by a Tukey window in order to minimize edge
+    and consequent non-periodicity effects and thus decrease
+    high-frequency power in the correlation function. To turn off the
+    apodization, use alpha=0.
+
+    Parameters
+    ----------
+    observed_spectrum : :3xn array
+        The observed spectrum.
+    template_spectrum : 3xn array
+        The template spectrum, which will be correlated with
+        the observed spectrum.
+    apodization_window: float, callable, or None
+        If a callable, will be treated as a window function for apodization of
+        the cross-correlation (should behave like a `~scipy.signal.windows`
+        window function, with ``sym=True``). If a float, will be treated as the
+        ``alpha`` parameter for a Tukey window (`~scipy.signal.windows.tukey`),
+        in units of pixels. If None, no apodization will be performed
+    mask : list, optional
+        Regions which is not used in cross-correlation.
+        If None, the full range of the given spectrum is used. The defulat is None.
+
+    Returns
+    -------
+    lag, corr: 2xn array
+        1st row: lag
+        2nd row: correlation signals at lags
+    """
+    _observed_spectrum = copy.deepcopy(observed_spectrum)
+    if template_type == 'emission':
+        if clipping:
+            std = np.std(_observed_spectrum[1,:])
+            _observed_spectrum[1,:] = abs_supress(_observed_spectrum[0,:], _observed_spectrum[1,:], 2*std)
+            _observed_spectrum[1,:] = emi_supress(_observed_spectrum[0,:], _observed_spectrum[1,:], 8*std)
+        else:
+            std = np.std(_observed_spectrum[1,:])
+            _observed_spectrum[1,:] = abs_supress(_observed_spectrum[0,:], _observed_spectrum[1,:], 2*std)
+    elif template_type == 'absorption':
+        if hcutoff_scale:
+            hcutoff_scale = hcutoff_scale/np.median(_observed_spectrum[0,1:]-_observed_spectrum[0,:-1])
+            hcutoff = 1/(2*hcutoff_scale)
+            _observed_spectrum[1,:] = butter_highstop_filter(_observed_spectrum[1,:], hcutoff, fs, order)
+        if clipping:
+            std = np.std(_observed_spectrum[1,:])
+            _observed_spectrum[1,:] = emi_supress(_observed_spectrum[0,:], _observed_spectrum[1,:], 2*std)
+            _observed_spectrum[1,:] = abs_supress(_observed_spectrum[0,:], _observed_spectrum[1,:], 5*std)
+        else:
+            std = np.std(_observed_spectrum[1,:])
+            _observed_spectrum[1,:] = emi_supress(_observed_spectrum[0,:], _observed_spectrum[1,:], 2*std)
+            
+    # resample if the user requested to log wavelength
+    
+    log_spectrum, log_template = template_logwl_resample(_observed_spectrum,
+                                                             template_spectrum)
+
+    # apodize (might be a no-op if apodization_window is None)
+    observed_log_spectrum, template_log_spectrum = _apodize(log_spectrum,
+                                                            log_template,
+                                                            apodization_window)
+    # Normalize template
+    normalization = _normalize(observed_log_spectrum, template_log_spectrum)
+
+    # Not sure if we need to actually normalize the template. Depending
+    # on the specific data uncertainty, the normalization factor
+    # may turn out negative. That causes a flip of the correlation function,
+    # in which the maximum (correlation peak) is no longer meaningful.
+    wave_l = observed_log_spectrum[0,:]
+    if normalization > 0.:
+        pass
+    else:
+        normalization = 1.
+    wave_l = observed_log_spectrum[0,:]
+    
+    # masking
+    observed_log_spectrum[1,:][observed_log_spectrum[3,:].astype(bool)] = 0
+    observed_log_spectrum[2,:][observed_log_spectrum[3,:].astype(bool)] = 0
+    
+    if mask != None:
+        for i in range(len(mask)):
+            left_end = abs(observed_log_spectrum[0,:]- mask[i][0]).argmin()
+            right_end = abs(observed_log_spectrum[0,:] - mask[i][1]).argmin()
+            observed_log_spectrum[1,:][left_end:right_end+1] = 0
+#             window = 1-tukey(right_end-left_end+1, alpha=0.3)
+#             observed_log_spectrum[1,:][left_end:right_end+1] *= window
         
     # Correlate
     corr = np.correlate(observed_log_spectrum[1,:],
@@ -227,7 +396,7 @@ def template_logwl_resample(spectrum, template, wblue=None, wred=None,
         w1 = max(ws1, wt1)
 
     if delta_log_wavelength is None:
-        ds = np.log10(spectrum[0,1:]) - np.log10(spectrum[0,:-1])
+        ds = np.log10(template[0,1:]) - np.log10(template[0,:-1])
         dw = ds[np.argmin(ds)]
     else:
         dw = delta_log_wavelength
