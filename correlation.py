@@ -96,7 +96,7 @@ def emi_supress(wavelength, flux, thres):
     
         
 
-def template_correlate2(observed_spectrum, template_spectrum, template_type, clipping=False, hcutoff_scale=10,
+def template_correlate2(observed_spectrum, template_spectrum, template_type, clipping=False, hcutoff_scale=2,
                        fs=1, order=2, apodization_window=0.05, mask = None):
     """
     Compute cross-correlation of the observed and template spectra.

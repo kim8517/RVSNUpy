@@ -150,7 +150,7 @@ def z_finding(corr, lag, pkfrac=0.65, template_dispersion = [0,0], correlation_r
 
 
 class rvm:
-    def __init__(self, spectrum, templates, star_templates=None, clipping=False, hcutoff_scale=10, apodization_window = 0.05, 
+    def __init__(self, spectrum, templates, star_templates=None, clipping=False, hcutoff_scale=2, apodization_window = 0.05, 
                  spectrum_range=None, template_range=None, correlation_range=[-0.01,2], mask = None,
                  continuum_subtraction = True, window = 80, sigma =3): 
         
