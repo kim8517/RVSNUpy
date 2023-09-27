@@ -275,22 +275,24 @@ def vd_finding(corr, lag, pkfrac=0.65, template_dispersion = [0,0], correlation_
 
 class rvm:
     def __init__(self, spectrum, templates, star_templates=None, clipping=False, hcutoff_scale=2, apodization_window = 0.05, 
-                 spectrum_range=None, template_range=None, correlation_range=[-0.01,2], mask = None,
+                 spectrum_range=None, rest_spectrum_range=None, template_range=None, correlation_range=[-0.01,2], mask = None,
                  continuum_subtraction = True, window = 80, sigma =3): 
         
         self.spectrum, self.templates, self.star_templates = spectrum, templates, star_templates
         self.clipping, self.hcutoff_scale, self.apdoization_window = clipping, hcutoff_scale, apodization_window
-        self.spectrum_range, self.template_range, self.correlation_range = spectrum_range, template_range, correlation_range
+        self.spectrum_range, self.rest_spectrum_range, self.template_range, self.correlation_range = spectrum_range, rest_spectrum_range, template_range, correlation_range
         self.mask = mask
         self.window, self.sigma = window, sigma
         
         if continuum_subtraction:
-            self.subt_spectrum = continuum.continuum_subtraction(self.spectrum, window=self.window, sigma=self.sigma)
+            self.subt_spectrum_ = continuum.continuum_subtraction(self.spectrum, window=self.window, sigma=self.sigma)
         else:
-            self.subt_spectrum = copy.deepcopy(self.spectrum)
+            self.subt_spectrum_ = copy.deepcopy(self.spectrum)
             
         if self.spectrum_range != None:
-            self.subt_spectrum = self.subt_spectrum[:,(self.subt_spectrum[0,:]>self.spectrum_range[0])&((self.subt_spectrum[0,:]<self.spectrum_range[1]))]
+            self.subt_spectrum = self.subt_spectrum_[:,(self.subt_spectrum_[0,:]>self.spectrum_range[0])&((self.subt_spectrum_[0,:]<self.spectrum_range[1]))]
+        else:
+            self.subt_spectrum = self.subt_spectrum_
             
     def redshift(self):
         template_list = list(self.templates.keys())
@@ -409,8 +411,8 @@ class rvm:
             
         return lag, corr, resampled_spectrum
     
-    def vd(self):
-        self.rest_spectrum = copy.deepcopy(self.subt_spectrum)
+    def vd(self, lcutoff_scale):
+        self.rest_spectrum_ = copy.deepcopy(self.subt_spectrum_)
         
         template_list = list(self.star_templates.keys())
         n_divide = len(template_list)//4
@@ -418,39 +420,49 @@ class rvm:
                             template_list[2*n_divide:3*n_divide], template_list[3*n_divide:]]
         
         if len(self.z) == 0:
-            template_name, r, dispersion, dispersion_error, flag = np.zeros(n_divide).astype(str), np.zeros(n_divide)*np.nan, np.zeros(n_divide)*np.nan, np.zeros(n_divide)*np.nan, 99*np.ones(n_divide).astype(int)
+            star_template_name, r_disp, dispersion, dispersion_error, flag_disp = np.zeros(n_divide).astype(str), np.zeros(n_divide)*np.nan, np.zeros(n_divide)*np.nan, np.zeros(n_divide)*np.nan, 99*np.ones(n_divide).astype(int)
         else:
-            self.rest_spectrum[0,:] = self.subt_spectrum[0,:]/(1+self.z[0])
-            def _vd(temp_names):
-                n_template = len(temp_names)
-                template_name = np.zeros(n_template, dtype='<U32')
-                r = np.zeros(n_template).astype(float)
-                dispersion = np.zeros(n_template)
-                dispersion_error = np.zeros(n_template)
-                flag = np.zeros(n_template).astype(int)
-                for i, temp_name in enumerate(temp_names):
-                    template_name[i], temp = temp_name, copy.deepcopy(self.star_templates[temp_name])
-                    if self.template_range != None:
-                        temp = temp[:,(temp[0,:]>self.template_range[0])&((temp[0,:]<self.template_range[1]))]
-                    lag, corr, observed_spectrum = correlation.template_correlate(self.rest_spectrum, temp[0], template_type=temp[2],
-                                                                                hcutoff_scale=0,
-                                                                                apodization_window = self.apdoization_window,
-                                                                                mask = self.mask)
-                    _, r[i], _,dispersion[i],dispersion_error[i],_,_,_,_,_,result = vd_finding(corr, lag, pkfrac = temp[1], template_dispersion=temp[3],
-                                                                    correlation_range=self.correlation_range)
-                    
-                if result == 'Well fitted':
-                    flag[i] = 0
-                elif result == 'Separated peaks':
-                    flag[i] = 1
-                else:
-                    flag[i] = 99
-                    
-                return template_name, r, dispersion, dispersion_error, flag
+            self.rest_spectrum_[0,:] = self.subt_spectrum_[0,:]/(1+self.z[0])
+            
+            if self.rest_spectrum_range != None:
+                 self.rest_spectrum = self.rest_spectrum_[:,(self.rest_spectrum_[0,:]>self.rest_spectrum_range[0])&((self.rest_spectrum_[0,:]<self.rest_spectrum_range[1]))]
+            else:
+                self.rest_spectrum = self.rest_spectrum_
+
+            if self.rest_spectrum.shape[1] == 0:
+                star_template_name, r_disp, dispersion, dispersion_error, flag_disp = np.zeros(n_divide).astype(str), np.zeros(n_divide)*np.nan, np.zeros(n_divide)*np.nan, np.zeros(n_divide)*np.nan, 99*np.ones(n_divide).astype(int)
+                
+            else:
+                def _vd(temp_names):
+                    n_template = len(temp_names)
+                    template_name = np.zeros(n_template, dtype='<U32')
+                    r = np.zeros(n_template).astype(float)
+                    dispersion = np.zeros(n_template)
+                    dispersion_error = np.zeros(n_template)
+                    flag = np.zeros(n_template).astype(int)
+                    for i, temp_name in enumerate(temp_names):
+                        template_name[i], temp = temp_name, copy.deepcopy(self.star_templates[temp_name])
+                        if self.template_range != None:
+                            temp = temp[:,(temp[0,:]>self.template_range[0])&((temp[0,:]<self.template_range[1]))]
+                        lag, corr, observed_spectrum = correlation.template_correlate(self.rest_spectrum, temp[0], template_type=temp[2],
+                                                                                    hcutoff_scale=0, lcutoff_scale=lcutoff_scale,
+                                                                                    apodization_window = self.apdoization_window,
+                                                                                    mask = self.mask)
+                        _, r[i], _,dispersion[i],dispersion_error[i],_,_,_,_,_,result = vd_finding(corr, lag, pkfrac = temp[1], template_dispersion=temp[3],
+                                                                        correlation_range=self.correlation_range)
+                        
+                        if result == 'Well fitted':
+                            flag[i] = 0
+                        elif result == 'Separated peaks':
+                            flag[i] = 1
+                        else:
+                            flag[i] = 99
+                        
+                    return template_name, r, dispersion, dispersion_error, flag
         
         
-            result = np.hstack(Parallel(n_jobs=4, verbose=0)(delayed(_vd)(temp_names) for temp_names in parallel_section))
-            star_template_name, r_disp, dispersion , dispersion_error, flag_disp = result[0], result[1].astype(float), result[2].astype(float), result[3].astype(float), result[4].astype(int)
+                result = np.hstack(Parallel(n_jobs=4, verbose=0)(delayed(_vd)(temp_names) for temp_names in parallel_section))
+                star_template_name, r_disp, dispersion , dispersion_error, flag_disp = result[0], result[1].astype(float), result[2].astype(float), result[3].astype(float), result[4].astype(int)
             
         # eliminate np.nan in r and error
         nan = np.ma.masked_invalid(r_disp).mask

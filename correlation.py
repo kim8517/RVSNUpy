@@ -51,47 +51,50 @@ def interp(flux, region):
 def abs_supress(wavelength, flux, thres):
     detection = flux < -1*thres
     
-    # find the line center
-    lends, rends = np.where(np.diff(detection.astype(int)) == 1)[0] + 1, np.where(np.diff(detection.astype(int)) == -1)[0] + 1
-    if detection[-1] == True: # dectecion = (..., True, True, True)
-        rends = np.concatenate((rends, np.array([len(flux)-1])))
-    if detection[0] == True: # dectecion = (True, True, True, ...)
-        lends = np.concatenate((np.array([0]), lends))
+    if len(flux[detection])>0:
+        # find the line center
+        lends, rends = np.where(np.diff(detection.astype(int)) == 1)[0] + 1, np.where(np.diff(detection.astype(int)) == -1)[0] + 1
+        if detection[-1] == True: # dectecion = (..., True, True, True)
+            rends = np.concatenate((rends, np.array([len(flux)-1])))
+        if detection[0] == True: # dectecion = (True, True, True, ...)
+            lends = np.concatenate((np.array([0]), lends))
+            
+        centers = (lends+rends) // 2
         
-    centers = (lends+rends) // 2
-    
-    # smoothly replace the lines with 0
-    region = np.zeros_like(flux).astype(bool)
-    width = int(24/np.median(wavelength[1:]-wavelength[:-1])) # 3x400 km/s at 6000 A
-    for lend, rend, center in zip(lends, rends, centers):
-        l,r = max(0, center-width), min(len(flux)-1, center+width)
-        window = 1-tukey(r-l+1, alpha=0.3)
-        flux[l:r+1] *= window
+        # smoothly replace the lines with 0
+        region = np.zeros_like(flux).astype(bool)
+        width = int(24/np.median(wavelength[1:]-wavelength[:-1])) # 3x400 km/s at 6000 A
+        for lend, rend, center in zip(lends, rends, centers):
+            l,r = max(0, center-width), min(len(flux)-1, center+width)
+            window = 1-tukey(r-l+1, alpha=0.3)
+            flux[l:r+1] *= window
         
     return flux
 
 def emi_supress(wavelength, flux, thres):
     detection = flux > thres
-    mask = np.zeros_like(flux).astype(bool)
-    flux[detection] = 0
     
-    # find the line center
-    lends, rends = np.where(np.diff(detection.astype(int)) == 1)[0] + 1, np.where(np.diff(detection.astype(int)) == -1)[0] + 1
-    if detection[-1] == True: # dectecion = (..., True, True, True)
-        rends = np.concatenate((rends, np.array([len(flux)-1])))
-    if detection[0] == True: # dectecion = (True, True, True, ...)
-        lends = np.concatenate((np.array([0]), lends))
+    if len(flux[detection])>0:
+        mask = np.zeros_like(flux).astype(bool)
+        flux[detection] = 0
         
-    centers = (lends+rends) // 2
-    
-    # smoothly replace the lines with 0
-    region = np.zeros_like(flux).astype(bool)
-    width = int(24/np.median(wavelength[1:]-wavelength[:-1])) # 3x400 km/s at 6000 A
-    for lend, rend, center in zip(lends, rends, centers):
-        l,r = max(0, center-width), min(len(flux)-1, center+width)
-        window = 1-tukey(r-l+1, alpha=0.3)
-        flux[l:r+1] *= window
+        # find the line center
+        lends, rends = np.where(np.diff(detection.astype(int)) == 1)[0] + 1, np.where(np.diff(detection.astype(int)) == -1)[0] + 1
+        if detection[-1] == True: # dectecion = (..., True, True, True)
+            rends = np.concatenate((rends, np.array([len(flux)-1])))
+        if detection[0] == True: # dectecion = (True, True, True, ...)
+            lends = np.concatenate((np.array([0]), lends))
+            
+        centers = (lends+rends) // 2
         
+        # smoothly replace the lines with 0
+        region = np.zeros_like(flux).astype(bool)
+        width = int(24/np.median(wavelength[1:]-wavelength[:-1])) # 3x400 km/s at 6000 A
+        for lend, rend, center in zip(lends, rends, centers):
+            l,r = max(0, center-width), min(len(flux)-1, center+width)
+            window = 1-tukey(r-l+1, alpha=0.3)
+            flux[l:r+1] *= window
+
     return flux
     
         
@@ -200,7 +203,7 @@ def template_correlate2(observed_spectrum, template_spectrum, template_type, cli
 
     return lags, corr, observed_log_spectrum
 
-def template_correlate(observed_spectrum, template_spectrum, template_type, clipping=False, hcutoff_scale=10,
+def template_correlate(observed_spectrum, template_spectrum, template_type, clipping=False, hcutoff_scale=False, lcutoff_scale=False,
                        order=2, apodization_window=0.05, mask = None):
     """
     Compute cross-correlation of the observed and template spectra.
@@ -237,6 +240,10 @@ def template_correlate(observed_spectrum, template_spectrum, template_type, clip
     """
     _observed_spectrum = copy.deepcopy(observed_spectrum)
     if template_type == 'emission':
+        if lcutoff_scale:
+            lcutoff_scale = lcutoff_scale/np.median(_observed_spectrum[0,1:]-_observed_spectrum[0,:-1])
+            lcutoff = 1/(2*lcutoff_scale)
+            _observed_spectrum[1,:] = butter_lowstop_filter(_observed_spectrum[1,:], lcutoff, fs=1, order=order)
         if clipping:
             std = np.std(_observed_spectrum[1,:])
             _observed_spectrum[1,:] = abs_supress(_observed_spectrum[0,:], _observed_spectrum[1,:], 2*std)
@@ -249,6 +256,10 @@ def template_correlate(observed_spectrum, template_spectrum, template_type, clip
             hcutoff_scale = hcutoff_scale/np.median(_observed_spectrum[0,1:]-_observed_spectrum[0,:-1])
             hcutoff = 1/(2*hcutoff_scale)
             _observed_spectrum[1,:] = butter_highstop_filter(_observed_spectrum[1,:], hcutoff, fs=1, order=order)
+        if lcutoff_scale:
+            lcutoff_scale = lcutoff_scale/np.median(_observed_spectrum[0,1:]-_observed_spectrum[0,:-1])
+            lcutoff = 1/(2*lcutoff_scale)
+            _observed_spectrum[1,:] = butter_lowstop_filter(_observed_spectrum[1,:], lcutoff, fs=1, order=order)
         if clipping:
             std = np.std(_observed_spectrum[1,:])
             _observed_spectrum[1,:] = emi_supress(_observed_spectrum[0,:], _observed_spectrum[1,:], 2*std)
