@@ -274,12 +274,12 @@ def vd_finding(corr, lag, pkfrac=0.65, template_dispersion = [0,0], correlation_
 
 
 class rvm:
-    def __init__(self, spectrum, templates, star_templates=None, clipping=False, hcutoff_scale=2, apodization_window = 0.05, 
+    def __init__(self, spectrum, templates, star_templates=None, clipping=False, hcutoff_scale=2, lcutoff_scale=False, apodization_window = 0.05, 
                  spectrum_range=None, rest_spectrum_range=None, template_range=None, correlation_range=[-0.01,2], mask = None,
                  continuum_subtraction = True, window = 80, sigma =3): 
         
         self.spectrum, self.templates, self.star_templates = spectrum, templates, star_templates
-        self.clipping, self.hcutoff_scale, self.apdoization_window = clipping, hcutoff_scale, apodization_window
+        self.clipping, self.hcutoff_scale, self.lcutoff_scale, self.apdoization_window = clipping, hcutoff_scale, lcutoff_scale, apodization_window
         self.spectrum_range, self.rest_spectrum_range, self.template_range, self.correlation_range = spectrum_range, rest_spectrum_range, template_range, correlation_range
         self.mask = mask
         self.window, self.sigma = window, sigma
@@ -310,9 +310,9 @@ class rvm:
             for i, temp_name in enumerate(temp_names):
                 template_name[i], temp = temp_name, copy.deepcopy(self.templates[temp_name])
                 if self.template_range != None:
-                    temp = temp[:,(temp[0,:]>self.template_range[0])&((temp[0,:]<self.template_range[1]))]
+                    temp = temp[:,(temp[0,:]>self.template_range[0])&(temp[0,:]<self.template_range[1])]
                 lag, corr, _ = correlation.template_correlate(self.subt_spectrum, temp[0], template_type=temp[2], 
-                                                              clipping=self.clipping, hcutoff_scale=self.hcutoff_scale, 
+                                                              clipping=self.clipping, hcutoff_scale=self.hcutoff_scale, lcutoff_scale=self.lcutoff_scale,
                                                               apodization_window = self.apdoization_window, mask = self.mask)
                 z[i], r[i], error[i],_,_,_,_,_,result = z_finding(corr, lag, pkfrac = temp[1],
                                                                   correlation_range=self.correlation_range)
@@ -411,7 +411,7 @@ class rvm:
             
         return lag, corr, resampled_spectrum
     
-    def vd(self, lcutoff_scale):
+    def vd(self, lcutoff_scale=False):
         self.rest_spectrum_ = copy.deepcopy(self.subt_spectrum_)
         
         template_list = list(self.star_templates.keys())

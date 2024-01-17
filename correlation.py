@@ -139,11 +139,11 @@ def template_correlate2(observed_spectrum, template_spectrum, template_type, cli
     hcutoff = 1/(2*hcutoff_scale)
     if template_type == 'emission':
         if clipping:
-            filtered_flux[filtered_flux>8*np.std(filtered_flux)] = 0
+            filtered_flux[filtered_flux>clipping*np.std(filtered_flux)] = 0
         filtered_flux[filtered_flux<-2*np.std(filtered_flux)] = 0
     elif template_type == 'absorption':
         if clipping:
-            filtered_flux[filtered_flux<-5*np.std(filtered_flux)] = 0
+            filtered_flux[filtered_flux<-1*clipping*np.std(filtered_flux)] = 0
         filtered_flux = butter_highstop_filter(filtered_flux, hcutoff, fs, order)
         filtered_flux[filtered_flux>2*np.std(filtered_flux)] = 0
         
