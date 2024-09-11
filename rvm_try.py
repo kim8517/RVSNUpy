@@ -7,23 +7,21 @@ from scipy.signal.windows import tukey
 import warnings
 import pandas as pd
 
-class process_spectrum:
-    warnings.simplefilter('ignore')
-    def __init__(self, wavelengths, fluxes, weights, temp_type, resolution=3, knots_bin = 100, thres=3, apodization_size = 0.05):
-        self.trace_continuum(wavelengths,fluxes, weights, temp_type=temp_type, resolution=resolution, knots_bin = knots_bin, thres = thres)
+class process_template:
+    def __init__(self, wavelengths, fluxes, weights, resolution=3, knots_bin = 100, thres=3, apodization_size = 0.05,
+                 line_weight=False):
+        if line_weight:
+            self.trace_continuum_line_weight(wavelengths,fluxes, weights, resolution=resolution, knots_bin = knots_bin)
+        else:
+            self.trace_continuum(wavelengths,fluxes, weights, resolution=resolution, knots_bin = knots_bin, thres = thres)
         self.normalized_fluxes = ((fluxes/self.continuum_fluxes)-1)*tukey(len(fluxes), apodization_size)
-        
     
-    def trace_continuum(self, wavelengths, fluxes, weights, temp_type, resolution, knots_bin = 200, thres=3):
+    def trace_continuum(self, wavelengths, fluxes, weights, resolution, knots_bin = 200, thres=3):
         self.knots = np.arange(wavelengths[0]+1e-10, wavelengths[-1]+1e-10, knots_bin)
-        
         sp_param = splrep(wavelengths, fluxes, t=self.knots, w=np.ones_like(fluxes), k=5)  # k is the degree of the spline
-
         self.continuum_fluxes = splev(wavelengths, sp_param)
         self.new_weights = copy.deepcopy(weights)
-        self.new_masks = copy.deepcopy(weights)
-        self.new_masks[self.new_masks!=0] = 1
-
+        self.lines =[]
         if thres:
             res = fluxes-self.continuum_fluxes
             std = np.nanstd(res)
@@ -50,23 +48,9 @@ class process_spectrum:
                             width = 2*int(fit_lines.stddev.value)
                         except:
                             continue
-                        if temp_type==1:
-                            if fit_lines.stddev.value*2*np.sqrt(2*np.log(2))>resolution:
-                                if fit_lines.amplitude.value>0:
-                                    self.new_weights[max(0,center-width):min(len(res),center+width+1)]=0
-                                    self.new_masks[max(0,center-width):min(len(res),center+width+1)]=0
-                                else:
-                                    self.new_weights[max(0,center-width):min(len(res),center+width+1)]=0
-                        elif temp_type==2:
-                            if fit_lines.stddev.value*2*np.sqrt(2*np.log(2))>resolution:
-                                if fit_lines.amplitude.value<0:
-                                    self.new_weights[max(0,center-width):min(len(res),center+width+1)]=0
-                                    self.new_masks[max(0,center-width):min(len(res),center+width+1)]=0
-                                else:
-                                    self.new_weights[max(0,center-width):min(len(res),center+width+1)]=0
-                        elif temp_type==0:
-                            if fit_lines.stddev.value*2*np.sqrt(2*np.log(2))>resolution:
-                                self.new_weights[max(0,center-width):min(len(res),center+width+1)]=0
+                        if fit_lines.stddev.value*2*np.sqrt(2*np.log(2))>resolution:
+                            self.new_weights[max(0,center-width):min(len(res),center+width+1)]=0
+                            self.lines.append([wavelengths[max(0,center-width)], wavelengths[min(len(res),center+width+1)]])
             
             concat_edge=[0]
             while len(concat_edge) > 0:
@@ -79,6 +63,113 @@ class process_spectrum:
             self.continuum_fluxes = splev(wavelengths, self.sp_param)
             self.continuum_fluxes[self.continuum_fluxes==0] = 1e+5*np.max(np.abs(fluxes))
             self.continuum_fluxes[0], self.continuum_fluxes[-1] = self.continuum_fluxes[1], self.continuum_fluxes[-2]
+            
+    def trace_continuum_line_weight(self, wavelengths, fluxes, weights, resolution, knots_bin = 200):
+        self.knots = np.arange(wavelengths[0]+1e-10, wavelengths[-1]+1e-10, knots_bin)
+        sp_param = splrep(wavelengths, fluxes, t=self.knots, w=weights, k=5)  # k is the degree of the spline
+        self.continuum_fluxes = splev(wavelengths, sp_param)
+        concat_edge=[0]
+        while len(concat_edge) > 0:
+            mask_ratio = np.histogram(wavelengths[weights==0], bins=self.knots)[0]/np.histogram(wavelengths, bins=self.knots)[0]
+            concat_edge = np.where(mask_ratio>0.25)[0]+1
+            self.knots = np.delete(self.knots, concat_edge)
+        
+        self.sp_param = splrep(wavelengths, fluxes, t=self.knots, k=5, w = weights)  # k is the degree of the spline
+    
+        self.continuum_fluxes = splev(wavelengths, self.sp_param)
+        self.continuum_fluxes[self.continuum_fluxes==0] = 1e+5*np.max(np.abs(fluxes))
+        self.continuum_fluxes[0], self.continuum_fluxes[-1] = self.continuum_fluxes[1], self.continuum_fluxes[-2]  
+    
+
+class process_spectrum:
+    warnings.simplefilter('ignore')
+    def __init__(self, wavelengths, fluxes, weights, temp_type, resolution=3, knots_bin = 100, thres=3, apodization_size = 0.05):
+        self.trace_continuum(wavelengths,fluxes, weights, resolution=resolution, knots_bin = knots_bin, thres = thres)
+        self.normalized_fluxes = ((fluxes/self.continuum_fluxes)-1)*tukey(len(fluxes), apodization_size)
+        self.gen_mask(wavelengths, fluxes, temp_type, weights, resolution)
+    
+    def trace_continuum(self, wavelengths, fluxes, weights, resolution, knots_bin = 200, thres=3):
+        self.knots = np.arange(wavelengths[0]+1e-10, wavelengths[-1]+1e-10, knots_bin)
+        sp_param = splrep(wavelengths, fluxes, t=self.knots, w=weights, k=5)  # k is the degree of the spline
+        self.continuum_fluxes = splev(wavelengths, sp_param)
+        self.new_weights = copy.deepcopy(weights)
+        self.lines =[]
+        if thres:
+            res = fluxes-self.continuum_fluxes
+            std = np.nanstd(res)
+            pscale = np.median(wavelengths[1:]-wavelengths[:-1])
+            detection = (np.abs(res)>thres*std)
+
+            i_weights = []
+            if len(res[detection])>0:
+                # find the line center
+                lends, rends = np.where(np.diff(detection.astype(int)) == 1)[0] + 1, np.where(np.diff(detection.astype(int)) == -1)[0] + 1
+                if detection[-1] == True: # dectecion = (..., True, True, True)
+                    rends = np.concatenate((rends, np.array([len(res)-1])))
+                if detection[0] == True: # dectecion = (True, True, True, ...)
+                    lends = np.concatenate((np.array([0]), lends))
+                centers = (lends+rends) // 2
+                widths = (rends-lends) // 2
+                self.centers = centers
+                for rend, lend, center in zip(rends, lends, centers):
+                    lines = models.Gaussian1D(amplitude=res[center], mean=wavelengths[center], stddev=(wavelengths[rend]-wavelengths[lend]+2)*0.5)
+                    if rend-lend+1>3:
+                        try:
+                            fitter = fitting.LevMarLSQFitter()
+                            fit_lines = fitter(lines, wavelengths[np.arange(lend,rend+1,1)], res[lend:rend+1])
+                            width = 2*int(fit_lines.stddev.value)
+                        except:
+                            continue
+                        if fit_lines.stddev.value*2*np.sqrt(2*np.log(2))>resolution:
+                            self.new_weights[max(0,center-width):min(len(res),center+width+1)]=0
+                            self.lines.append([fit_lines.mean.value-2*fit_lines.stddev.value, fit_lines.mean.value+2*fit_lines.stddev.value])
+            
+            concat_edge=[0]
+            while len(concat_edge) > 0:
+                mask_ratio = np.histogram(wavelengths[self.new_weights==0], bins=self.knots)[0]/np.histogram(wavelengths, bins=self.knots)[0]
+                concat_edge = np.where(mask_ratio>0.25)[0]+1
+                self.knots = np.delete(self.knots, concat_edge)
+            
+            self.sp_param = splrep(wavelengths, fluxes, t=self.knots, k=5, w = self.new_weights)  # k is the degree of the spline
+        
+            self.continuum_fluxes = splev(wavelengths, self.sp_param)
+            self.continuum_fluxes[self.continuum_fluxes==0] = 1e+5*np.max(np.abs(fluxes))
+            self.continuum_fluxes[0], self.continuum_fluxes[-1] = self.continuum_fluxes[1], self.continuum_fluxes[-2]
+            
+    def gen_mask(self, wavelengths, fluxes, temp_type, weights, resolution, thres=3):
+        self.new_masks = copy.deepcopy(weights)
+        self.new_masks[self.new_masks!=0] = 1
+        
+        res = fluxes-self.continuum_fluxes
+        std = np.nanstd(res)
+        detection = (np.abs(res)>thres*std)
+        if len(res[detection])>0:
+                # find the line center
+            lends, rends = np.where(np.diff(detection.astype(int)) == 1)[0] + 1, np.where(np.diff(detection.astype(int)) == -1)[0] + 1
+            if detection[-1] == True: # dectecion = (..., True, True, True)
+                rends = np.concatenate((rends, np.array([len(res)-1])))
+            if detection[0] == True: # dectecion = (True, True, True, ...)
+                lends = np.concatenate((np.array([0]), lends))
+            centers = (lends+rends) // 2
+            widths = (rends-lends) // 2
+            self.centers = centers
+            for rend, lend, center in zip(rends, lends, centers):
+                lines = models.Gaussian1D(amplitude=res[center], mean=wavelengths[center], stddev=(wavelengths[rend]-wavelengths[lend]+2)*0.5)
+                if rend-lend+1>3:
+                    try:
+                        fitter = fitting.LevMarLSQFitter()
+                        fit_lines = fitter(lines, wavelengths[np.arange(lend,rend+1,1)], res[lend:rend+1])
+                        width = 2*int(fit_lines.stddev.value)
+                    except:
+                        continue
+                    if fit_lines.stddev.value*2*np.sqrt(2*np.log(2))>resolution:
+                        if temp_type==1:
+                            if fit_lines.amplitude.value>0:
+                                self.new_masks[max(0,center-width):min(len(res),center+width+1)]=0
+                        elif temp_type==2:
+                            if fit_lines.amplitude.value<0:
+                                self.new_masks[max(0,center-width):min(len(res),center+width+1)]=0
+        
         
 from scipy.interpolate import CubicSpline
 
@@ -104,8 +195,8 @@ def shift_templates(templates, z_range=[-0.1,2], apodization_size=0.05, knots_bi
     for temp_name in templates.keys():
         temp = templates[temp_name][0]
         if normalziation:
-            normalize=process_spectrum(temp[0], temp[1], np.ones_like(temp[1]), temp_type=0, knots_bin=knots_bin, thres=thres, apodization_size=apodization_size)
-            
+            normalize=process_template(temp[0], temp[1], np.ones_like(temp[1]), knots_bin=knots_bin, thres=thres, apodization_size=apodization_size)
+        
         # log pixel scale
         log_wavelengths = np.log10(temp[0])
         log_bin = np.median(log_wavelengths[1:]-log_wavelengths[:-1])
@@ -127,6 +218,7 @@ def shift_templates(templates, z_range=[-0.1,2], apodization_size=0.05, knots_bi
         
         min_log_vel = -n_left*log_bin
         shifted_vels = c*(pow(10,np.ones(n_shift)*min_log_vel+np.arange(n_shift)*log_bin)-1)
+        
         shifted_templates[temp_name] = [shifted_vels, shifted_wavelengths, shifted_fluxes]
     return shifted_templates
 
@@ -159,8 +251,8 @@ def return_nan(x):
     return np.nan
 
 class cc_result:
-    def __init__(self, spectrum, normalize, processed_fluxes, template, shifted_template, normalization_template=True,
-                 temp_apodization_size=0.05, temp_knots_bin=100, temp_line_thres=3, weight=True,
+    def __init__(self, spectrum, normalize, processed_fluxes, template, shifted_template, temp_line_thres=3, normalization_template=True,
+                 temp_apodization_size=0.05, temp_knots_bin=100, weight=True,
                  z_range=[-0.01,2]):
         warnings.simplefilter('ignore')
         self.spectrum, self.normalize, self.processed_fluxes = spectrum, normalize, processed_fluxes
@@ -168,11 +260,11 @@ class cc_result:
         self.temp_apodization_size, self.temp_knots_bin, self.temp_line_thres = temp_apodization_size, temp_knots_bin, temp_line_thres
         self.z_range = z_range
         self.shifted_vels, self.shifted_wavelengths, self.shifted_fluxes, self.template_spectrum = self.shifted_template[0], self.shifted_template[1], self.shifted_template[2], self.template[0]
-        # self.cross_correlate(weight, normalization_template)
-        try:
-            self.cross_correlate(weight, normalization_template)
-        except:
-            self.z, self.zerr, self.r, self.pkratio, self.chi_eff  = np.nan, np.nan, np.nan, 99, np.nan
+        self.cross_correlate(weight, normalization_template)
+        # try:
+        #     self.cross_correlate(weight, normalization_template)
+        # except:
+        #     self.z, self.zerr, self.r, self.pkratio, self.chi_eff  = np.nan, np.nan, np.nan, 99, np.nan
         
         
     def cross_correlate0(self, weight=True):
@@ -199,8 +291,8 @@ class cc_result:
 
             self.cc0 = np.matmul(self.shifted_fluxes, self.new_masks0*self.new_weights0*self.new_fluxes0)
 
-
         self.cz0 = self.shifted_vels[np.nanargmax(self.cc0)]
+        
 
     def find_peak_region(self):
         cz_range = np.array(self.z_range)*c
@@ -249,7 +341,6 @@ class cc_result:
             else:
                 self.peak_ranges.append(prange)
                 n +=1
-        
             
     def cc_near_peak(self):
         left_new_wavelengths, right_new_wavelengths = self.shifted_wavelengths[self.shifted_wavelengths<self.spectrum[0,0]], self.shifted_wavelengths[self.shifted_wavelengths>self.spectrum[0,-1]]
@@ -261,20 +352,64 @@ class cc_result:
         self.new_weights[(self.new_wavelengths>=self.spectrum[0,0])&(self.new_wavelengths<=self.spectrum[0,-1])] = np.abs(self.normalize.continuum_fluxes/self.spectrum[2])
         self.new_masks[(self.new_wavelengths>=self.spectrum[0,0])&(self.new_wavelengths<=self.spectrum[0,-1])] = self.spectrum[3]
 
+        # identify lines in the templates
+        prange = self.peak_ranges[0]
+        peak_region = np.where((self.shifted_vels>prange[0])&(self.shifted_vels<prange[1]))[0]
+        i = int(np.median(peak_region))
+        region = ((self.new_wavelengths>=self.shifted_wavelengths[i])&(self.new_wavelengths<=self.shifted_wavelengths[i+self.template_spectrum.shape[1]-1]))
+        new_template_wavelengths = self.new_wavelengths[region]
+        resampled_template_fluxes = resampler(self.shifted_wavelengths[i:i+self.template_spectrum.shape[1]], self.template_spectrum[1], new_template_wavelengths)
+        template_lines_at_peak = process_template(new_template_wavelengths, resampled_template_fluxes, self.new_fit_weights[region],
+                                          knots_bin = self.temp_knots_bin, thres = self.temp_line_thres, apodization_size=self.temp_apodization_size).lines
+        
         self.cc = copy.deepcopy(self.cc0)
         max_peaks = np.zeros(len(self.peak_ranges))
         for m, prange in enumerate(self.peak_ranges):
             self.peak_region = np.where((self.shifted_vels>prange[0])&(self.shifted_vels<prange[1]))[0]
             self.interp_fluxes = np.zeros((len(self.peak_region),len(self.new_fluxes)))
+            
+            n = 0
+            i = self.peak_region[n]
+            region = ((self.new_wavelengths>=self.shifted_wavelengths[i])&(self.new_wavelengths<=self.shifted_wavelengths[i+self.template_spectrum.shape[1]-1]))
+            new_template_wavelengths = self.new_wavelengths[region]
+            resampled_template_fluxes = resampler(self.shifted_wavelengths[i:i+self.template_spectrum.shape[1]], self.template_spectrum[1], new_template_wavelengths)
+            teplate_lines_at_peak = process_template(new_template_wavelengths, resampled_template_fluxes, self.new_fit_weights[region], knots_bin = self.temp_knots_bin,
+                                                thres = self.temp_line_thres, apodization_size=self.temp_apodization_size).lines
+            self.template_lines = []
+            for line_short, line_long in template_lines_at_peak:
+                self.template_lines.append([line_short/(1+self.shifted_vels[i]/c), line_long/(1+self.shifted_vels[i]/c)])
+                
+            if m == 2:
+                plt.plot(resampled_template_fluxes, alpha=0.3)
+                plt.plot(process_template(new_template_wavelengths, resampled_template_fluxes, self.new_fit_weights[region], knots_bin = self.temp_knots_bin,
+                                                thres = self.temp_line_thres, apodization_size=self.temp_apodization_size).continuum_fluxes)
+                plt.show()
+            # print(self.template_lines)
+ 
+            import matplotlib.pyplot as plt
             for n, i in enumerate(self.peak_region):
                 region = ((self.new_wavelengths>=self.shifted_wavelengths[i])&(self.new_wavelengths<=self.shifted_wavelengths[i+self.template_spectrum.shape[1]-1]))
+                self.temp_fit_weights = copy.deepcopy(self.new_fit_weights)[region]
                 new_template_wavelengths = self.new_wavelengths[region]
                 resampled_template_fluxes = resampler(self.shifted_wavelengths[i:i+self.template_spectrum.shape[1]], self.template_spectrum[1], new_template_wavelengths)
-                self.interp_fluxes[n,region] = process_spectrum(new_template_wavelengths, resampled_template_fluxes, self.new_fit_weights[region], temp_type=0, knots_bin = self.temp_knots_bin,
-                                                        thres = self.temp_line_thres, apodization_size=self.temp_apodization_size).normalized_fluxes
+                for line_short, line_long in self.template_lines:
+                    self.temp_fit_weights[(new_template_wavelengths>line_short*(1+self.shifted_vels[i]/c))&(new_template_wavelengths<line_long*(1+self.shifted_vels[i]/c))] = 0
+                self.interp_fluxes[n,region] = process_template(new_template_wavelengths, resampled_template_fluxes, self.temp_fit_weights, line_weight=True,
+                                                                knots_bin = self.temp_knots_bin, apodization_size=self.temp_apodization_size).normalized_fluxes
+                if (n==0) & (m == 2):
+                    # for line_short, line_long in self.template_lines:
+                    #     print(np.where((self.new_wavelengths>line_short*(1+self.shifted_vels[i]/c))&(self.new_wavelengths<line_long*(1+self.shifted_vels[i]/c))))
+                    print(len(process_template(new_template_wavelengths, resampled_template_fluxes, self.new_fit_weights[region], knots_bin = self.temp_knots_bin,
+                                                thres = self.temp_line_thres, apodization_size=self.temp_apodization_size).new_weights), len(self.temp_fit_weights))
+                    print(np.where(process_template(new_template_wavelengths, resampled_template_fluxes, self.new_fit_weights[region], knots_bin = self.temp_knots_bin,
+                                                thres = self.temp_line_thres, apodization_size=self.temp_apodization_size).new_weights==0))
+                    print(np.where(self.temp_fit_weights==0))
+                    plt.plot(resampled_template_fluxes, alpha=0.3)
+                    plt.plot(process_template(new_template_wavelengths, resampled_template_fluxes, self.temp_fit_weights, line_weight=True, knots_bin = self.temp_knots_bin,
+                                            apodization_size=self.temp_apodization_size).continuum_fluxes)
+                    plt.show()
                 # self.interp_fluxes[n,region] = process_spectrum(new_template_wavelengths, resampled_template_fluxes, np.ones_like(resampled_template_fluxes), temp_type=0, knots_bin = self.temp_knots_bin,
                 #                                         thres = self.temp_line_thres, apodization_size=self.temp_apodization_size).normalized_fluxes
-
             weight_cc = np.matmul(self.interp_fluxes,self.new_masks*self.new_weights**2*self.new_fluxes)
             max_peaks[m] = np.nanmax(weight_cc)
             self.cc[self.peak_region] = weight_cc
@@ -332,8 +467,11 @@ class cc_result:
         self.overlap_spec = self.spectrum[:,(self.spectrum[0,:]>max(z_wavelength[0], self.spectrum[0,0]))&
                                      (self.spectrum[0,:]<min(z_wavelength[-1], self.spectrum[0,-1]))]
         T = resampler(z_wavelength, self.template_spectrum[1], self.overlap_spec[0])
-        T_continuum = process_spectrum(self.overlap_spec[0], T, np.abs(self.overlap_spec[3]/self.overlap_spec[2]), temp_type=0, knots_bin = self.temp_knots_bin,
-                                                        thres = self.temp_line_thres, apodization_size=self.temp_apodization_size)
+        T_conti_weights = np.abs(self.overlap_spec[3]/self.overlap_spec[2])
+        for line_short, line_long in self.template_lines:
+                    T_conti_weights[(self.overlap_spec[0]>line_short*(1+self.z))&(self.overlap_spec[0]<line_long*(1+self.z))] = 0
+        T_continuum = process_spectrum(self.overlap_spec[0], T, T_conti_weights, temp_type=0, knots_bin = self.temp_knots_bin,
+                                                        thres = 0, apodization_size=self.temp_apodization_size)
         self.T_ = T*self.normalize.continuum_fluxes[(self.spectrum[0,:]>max(z_wavelength[0], self.spectrum[0,0]))&(self.spectrum[0,:]<min(z_wavelength[-1], self.spectrum[0,-1]))]/T_continuum.continuum_fluxes
         self.chi_eff = np.sum(((self.overlap_spec[3]/self.overlap_spec[2])**2*(self.overlap_spec[1]-self.T_)**2))/(np.sum((self.overlap_spec[3]))-len(T_continuum.knots)-1)                     
         # self.chi_eff = np.sum(((self.overlap_spec[3]/self.overlap_spec[2])**2*(self.overlap_spec[1]-self.T_)**2))/(np.sum((self.overlap_spec[3]))-len(T_continuum.knots)-1)                     
@@ -562,7 +700,7 @@ class rvm:
         self.cc_result = cc_result(self.cspectrum, weight=weight, normalize = self.norm, processed_fluxes=self.processed_fluxes,
                                    template = self.templates[temp_name], shifted_template = self.shifted_templates[temp_name],
                                    normalization_template = self.normalization_template, 
-                                   temp_apodization_size = self.temp_apodization_size, temp_knots_bin = self.temp_knots_bin, temp_line_thres = self.temp_line_thres,
+                                   temp_apodization_size = self.temp_apodization_size, temp_knots_bin = self.temp_knots_bin, temp_line_thres=self.temp_line_thres,
                                    z_range = self.z_range)
 
     def z_multi(self, spectrums, directory=None, multi_process=4, **kwargs):

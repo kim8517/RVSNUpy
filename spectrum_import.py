@@ -5,7 +5,6 @@ from astropy.io import fits
 from matplotlib import pyplot as plt
 from astroquery.sdss import SDSS
 from astropy.table import Table
-from RVSNUpy.correlation import resampler
 
 
 def vac2air(wavelength):
@@ -54,22 +53,21 @@ def sdss_fits(file, dr=14, plotting=False):
         flux = data[0]
         ivar = data[2]
         mask = data[3]
-        
+    
+    ivar[ivar==0] = 1e-10
+    mask = (~mask.astype(bool)).astype(int)
     wavelength = vac2air(10**wavelength)
     
     # For cross-correlation, uncertainty is processed as a standard deviation
-    uncertainty = (1/np.sqrt(ivar))*10**-17
+    uncertainty = (1/np.sqrt(ivar))
     # create spectrum1D
-    _spectrum = np.vstack([wavelength, flux*10**-17, uncertainty, mask])
-    
-    linear_wave = np.linspace(wavelength[0], wavelength[-1], len(wavelength))
-    spectrum = resampler(_spectrum,linear_wave)
-    
+    spectrum = np.vstack([wavelength, flux, uncertainty, mask])
+    f.close()
     if plotting:
         plt.figure()
         plt.step(spectrum[0,:], spectrum[1,:],'k-')
         plt.xlabel('Wavelength (AA)')
-        plt.ylabel('Flux (\'erg cm-2 s-1 AA-1\')')
+        plt.ylabel('Flux')
         plt.show()
         
     return spectrum
@@ -94,8 +92,7 @@ def MMT_raw(file, plotting=False):
     header = f[0].header
     flux = (f[0].data)[0][0]
     flux = flux
-    uncertainty = ((f[0].data)[3][0])
-    uncertainty = (1/np.sqrt(uncertainty))
+    uncertainty = (f[0].data)[3][0]
     
     sz = len(flux)
     crval = header['CRVAL1']
@@ -111,7 +108,7 @@ def MMT_raw(file, plotting=False):
     wavelength = (np.arange(sz) - crpix + 1)*cdelt+crval
     wavelength = wavelength
         
-    mask = np.zeros(len(wavelength))
+    mask = np.ones(len(wavelength))
         
     spectrum = np.vstack([wavelength, flux, uncertainty, mask])
     
@@ -121,7 +118,7 @@ def MMT_raw(file, plotting=False):
         plt.xlabel('Wavelength (AA)')
         plt.ylabel('Flux (\'erg cm-2 s-1 AA-1\')')
         plt.show()
-    
+    f.close()
     return spectrum
 
 def MMT_flux(file):
@@ -145,7 +142,8 @@ def MMT_flux(file):
     wavelength = (np.arange(sz) - crpix + 1)*cdelt+crval
     wavelength = wavelength
         
-    mask = np.zeros(len(wavelength))
+    mask = np.ones(len(wavelength))
         
     spectrum = np.vstack([wavelength, flux, uncertainty, mask])
+    f.close()
     return spectrum

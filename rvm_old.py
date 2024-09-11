@@ -172,7 +172,7 @@ class cc_result:
         try:
             self.cross_correlate(weight, normalization_template)
         except:
-            self.z, self.zerr, self.r, self.pkratio, self.chi_eff  = np.nan, np.nan, np.nan, 99, np.nan
+            self.z, self.zerr, self.r, self.result, self.chi_eff  = np.nan, np.nan, np.nan, 99, np.nan
         
         
     def cross_correlate0(self, weight=True):
@@ -222,7 +222,7 @@ class cc_result:
         centers = (lends+rends) // 2
 
         self.peak_ranges = []
-        self.pkratio = 0
+        self.result = 1
         n = 0
         for i_peak in np.argsort(self.cc0[centers])[-1::-1]:
             if n>5:
@@ -241,7 +241,7 @@ class cc_result:
                 
             if (self.gaussian_peak_range.amplitude.value < 0) | (self.gaussian_peak_range.mean.value < cz_range[0]) | (self.gaussian_peak_range.mean.value>cz_range[1]) | (len(np.where((self.shifted_vels>prange[0])&(self.shifted_vels<prange[1]))[0])<1):
                 if n == 0:
-                    self.z, self.zerr, self.r, self.chi_eff, self.pkratio  = np.nan, np.nan, np.nan, np.nan, 9
+                    self.z, self.zerr, self.r, self.chi_eff, self.result  = np.nan, np.nan, np.nan, np.nan, 9
                     break
                 else:
                     continue
@@ -274,7 +274,6 @@ class cc_result:
                                                         thres = self.temp_line_thres, apodization_size=self.temp_apodization_size).normalized_fluxes
                 # self.interp_fluxes[n,region] = process_spectrum(new_template_wavelengths, resampled_template_fluxes, np.ones_like(resampled_template_fluxes), temp_type=0, knots_bin = self.temp_knots_bin,
                 #                                         thres = self.temp_line_thres, apodization_size=self.temp_apodization_size).normalized_fluxes
-
             weight_cc = np.matmul(self.interp_fluxes,self.new_masks*self.new_weights**2*self.new_fluxes)
             max_peaks[m] = np.nanmax(weight_cc)
             self.cc[self.peak_region] = weight_cc
@@ -282,14 +281,18 @@ class cc_result:
         peak_order = np.argsort(max_peaks)
         self.n_peakmax = peak_order[-1]
         if len(peak_order)>1:
-            self.pkratio = max_peaks[peak_order][-2]/max_peaks[peak_order][-1]
+            if self.pkfrac*max_peaks[peak_order][-1]<max_peaks[peak_order][-2]:
+                self.result = 2
+            else:
+                self.result = 1
         else:
-            self.pkratio = 0
+            self.result = 1
     
     def cross_correlate(self, weight=True, normalization_template=True):
         self.cross_correlate0(weight)
+        self.pkfrac = self.template[1]
         self.find_peak_region()
-        if self.pkratio != 9:
+        if self.result != 9:
             self.cc_near_peak()
             self.z_finding()
         else:
@@ -375,7 +378,7 @@ class rvm:
         self.shifted_templates2 = shift_templates(self.templates2, self.z_range, self.temp_apodization_size, temp_knots_bin, temp_line_thres, self.normalization_template)
     
     def z_single(self, spectrum, weight=True, output='all', prior='abs', normalization=True, spectrum_range=None, resolution=3, chi_thres=2, mask=None, r_abs=2, r_em=10, 
-                 pkratio_abs=1, pkratio_em=1, knots_bin=100, line_thres=3, apodization_size=0.05, window_continuum=100, sn_continuum=1):
+                 knots_bin=100, line_thres=3, apodization_size=0.05, window_continuum=100, sn_continuum=1):
         
         spectrum = copy.deepcopy(spectrum)
         
@@ -393,7 +396,7 @@ class rvm:
 
         
         # absorption tempaltes
-        normalize = process_spectrum(abs_spectrum[0], abs_spectrum[1], np.abs(abs_spectrum[3]/abs_spectrum[2]), resolution=resolution, temp_type=1, knots_bin = knots_bin,
+        normalize = process_spectrum(abs_spectrum[0], abs_spectrum[1], np.abs(abs_spectrum[3]/abs_spectrum[2]), temp_type=1, knots_bin = knots_bin,
                                     thres=line_thres, apodization_size=apodization_size)
         abs_spectrum[3] = normalize.new_masks
         
@@ -410,31 +413,31 @@ class rvm:
         
         template_names1 = list(self.templates1.keys())
         n_templates1 = len(template_names1)
-        z1, zerr1, r1, chi_eff1, pkratio1 = np.zeros(n_templates1), np.zeros(n_templates1), np.zeros(n_templates1), np.zeros(n_templates1), np.zeros(n_templates1)
+        z1, zerr1, r1, chi_eff1, flag1 = np.zeros(n_templates1), np.zeros(n_templates1), np.zeros(n_templates1), np.zeros(n_templates1), np.zeros(n_templates1, dtype=int)
         for i, temp_name in enumerate(template_names1):
             cc_spec_temp = cc_result(abs_spectrum, weight=weight, normalize=normalize, processed_fluxes=processed_fluxes1,
                                      template=self.templates1[temp_name], shifted_template=self.shifted_templates1[temp_name],
                                      normalization_template = self.normalization_template, 
                                      temp_apodization_size=self.temp_apodization_size,
                                      temp_knots_bin=self.temp_knots_bin, temp_line_thres=self.temp_line_thres, z_range=self.z_range)
-            z1[i], zerr1[i], r1[i], chi_eff1[i], pkratio1[i] = cc_spec_temp.z, cc_spec_temp.zerr, cc_spec_temp.r, cc_spec_temp.chi_eff, cc_spec_temp.pkratio 
+            z1[i], zerr1[i], r1[i], chi_eff1[i], flag1[i] = cc_spec_temp.z, cc_spec_temp.zerr, cc_spec_temp.r, cc_spec_temp.chi_eff, cc_spec_temp.result 
                 
         # remove the results with nan-redshift
         if chi_thres:
             nan_check = (~np.isnan(zerr1))&(~np.isnan(r1))&(~np.isnan(chi_eff1))&(chi_eff1<chi_thres)
         else:
             nan_check = (~np.isnan(zerr1))&(~np.isnan(r1))&(~np.isnan(chi_eff1))
-        template_names1, z1, zerr1, r1, chi_eff1, pkratio1 = np.array(template_names1)[nan_check], z1[nan_check], zerr1[nan_check], r1[nan_check], chi_eff1[nan_check], pkratio1[nan_check]
+        template_names1, z1, zerr1, r1, chi_eff1, flag1 = np.array(template_names1)[nan_check], z1[nan_check], zerr1[nan_check], r1[nan_check], chi_eff1[nan_check], flag1[nan_check]
         
         # best result among absorption templates
         if len(r1):
             i_best1 = np.nanargmax(r1)
-            best_templates_name1, best_z1, best_zerr1, best_r1, best_chi_eff1, best_pkratio1 = template_names1[i_best1], z1[i_best1], zerr1[i_best1], r1[i_best1], chi_eff1[i_best1], pkratio1[i_best1]
+            best_templates_name1, best_z1, best_zerr1, best_r1, best_chi_eff1, best_flag1 = template_names1[i_best1], z1[i_best1], zerr1[i_best1], r1[i_best1], chi_eff1[i_best1], flag1[i_best1]
         else:
-            best_r1, best_pkratio1 = 0, 99
+            best_r1 = 0
             
         # emission tempaltes
-        normalize = process_spectrum(em_spectrum[0], em_spectrum[1], np.abs(em_spectrum[3]/em_spectrum[2]), resolution=resolution, temp_type=2, knots_bin = knots_bin,
+        normalize = process_spectrum(em_spectrum[0], em_spectrum[1], np.abs(em_spectrum[3]/em_spectrum[2]), temp_type=2, knots_bin = knots_bin,
                                     thres=line_thres, apodization_size=apodization_size)
         em_spectrum[3] = normalize.new_masks
         
@@ -452,7 +455,7 @@ class rvm:
         
         template_names2 = list(self.templates2.keys())
         n_templates2 = len(template_names2)
-        z2, zerr2, r2, chi_eff2, pkratio2 = np.zeros(n_templates2), np.zeros(n_templates2), np.zeros(n_templates2), np.zeros(n_templates2), np.zeros(n_templates2)
+        z2, zerr2, r2, chi_eff2, flag2 = np.zeros(n_templates2), np.zeros(n_templates2), np.zeros(n_templates2), np.zeros(n_templates2), np.zeros(n_templates2, dtype=int)
         for i, temp_name in enumerate(template_names2):
             cc_spec_temp = cc_result(em_spectrum, weight=weight, normalize=normalize, processed_fluxes=processed_fluxes2, 
                                      template=self.templates2[temp_name], shifted_template=self.shifted_templates2[temp_name],
@@ -460,39 +463,39 @@ class rvm:
                                      temp_apodization_size=self.temp_apodization_size,
                                      temp_knots_bin=self.temp_knots_bin, temp_line_thres=self.temp_line_thres, z_range=self.z_range)
         # return output
-            z2[i], zerr2[i], r2[i], chi_eff2[i], pkratio2[i] = cc_spec_temp.z, cc_spec_temp.zerr, cc_spec_temp.r, cc_spec_temp.chi_eff, cc_spec_temp.pkratio 
+            z2[i], zerr2[i], r2[i], chi_eff2[i], flag2[i] = cc_spec_temp.z, cc_spec_temp.zerr, cc_spec_temp.r, cc_spec_temp.chi_eff, cc_spec_temp.result 
                 
         # remove the results with nan-redshift
         nan_check = (~np.isnan(zerr2))&(~np.isnan(r2))&(~np.isnan(chi_eff2))
-        template_names2, z2, zerr2, r2, chi_eff2, pkratio2 = np.array(template_names2)[nan_check], z2[nan_check], zerr2[nan_check], r2[nan_check], chi_eff2[nan_check], pkratio2[nan_check]
+        template_names2, z2, zerr2, r2, chi_eff2, flag2 = np.array(template_names2)[nan_check], z2[nan_check], zerr2[nan_check], r2[nan_check], chi_eff2[nan_check], flag2[nan_check]
 
         # best result among absorption templates
         if len(r2):
             i_best2 = np.nanargmax(r2)
-            best_templates_name2, best_z2, best_zerr2, best_r2, best_chi_eff2, best_pkratio2 = template_names2[i_best2], z2[i_best2], zerr2[i_best2], r2[i_best2], chi_eff2[i_best2], pkratio2[i_best2]     
+            best_templates_name2, best_z2, best_zerr2, best_r2, best_chi_eff2, best_flag2 = template_names2[i_best2], z2[i_best2], zerr2[i_best2], r2[i_best2], chi_eff2[i_best2], flag2[i_best2]     
         else:
-            best_r2, best_pkratio2 = 0, 99
+            best_r2 = 0
 
         # choose the best result
         if prior=='abs':
-            if (best_r1 > r_abs) & (best_pkratio1 < pkratio_abs):
+            if best_r1 > r_abs:
                 i_best = i_best1
-                best = (best_templates_name1, best_z1, best_zerr1, best_r1, best_chi_eff1, best_pkratio1)
+                best = (best_templates_name1, best_z1, best_zerr1, best_r1, best_chi_eff1, best_flag1)
             else:
-                if (best_r2 > r_em) & (best_pkratio2 < pkratio_em):
+                if best_r2 > r_em:
                     i_best = i_best2 + len(r1)
-                    best = (best_templates_name2, best_z2, best_zerr2, best_r2, best_chi_eff2, best_pkratio2)
+                    best = (best_templates_name2, best_z2, best_zerr2, best_r2, best_chi_eff2, best_flag2)
                 else:
                     i_best = None
                     best = ('No_template', -9,-9,-9,-9,99)
         elif prior=='em':
-            if (best_r2 > r_em) & (best_pkratio2 < pkratio2):
+            if best_r2 > r_em:
                 i_best = i_best2+len(r1)
-                best = (best_templates_name2, best_z2, best_zerr2, best_r2, best_chi_eff2, best_pkratio2)
+                best = (best_templates_name2, best_z2, best_zerr2, best_r2, best_chi_eff2, best_flag2)
             else:
-                if (best_r1 > r_abs) & (best_pkratio2 < pkratio1):
+                if best_r1 > r_abs:
                     i_best = i_best1
-                    best = (best_templates_name1, best_z1, best_zerr1, best_r1, best_chi_eff1, best_pkratio1)
+                    best = (best_templates_name1, best_z1, best_zerr1, best_r1, best_chi_eff1, best_flag1)
                 else:
                     i_best = None
                     best = ('No_template', -9,-9,-9,-9,99)
@@ -502,26 +505,24 @@ class rvm:
         
         if output=='all':
             # concatenate the results from absorption and emission templates
-            template_names, z, zerr, r, chi_eff, pkratio = np.concatenate([template_names1, template_names2]), np.concatenate([z1, z2]), np.concatenate([zerr1, zerr2]), np.concatenate([r1,r2]), np.concatenate([chi_eff1, chi_eff2]), np.concatenate([pkratio1, pkratio2])
-            note = np.zeros_like(r).astype(str)
-            note[:] = ' '
+            template_names, z, zerr, r, chi_eff, flag = np.concatenate([template_names1, template_names2]), np.concatenate([z1, z2]), np.concatenate([zerr1, zerr2]), np.concatenate([r1,r2]), np.concatenate([chi_eff1, chi_eff2]), np.concatenate([flag1, flag2])
             if i_best != None:
-                note[i_best] = 'best'
+                flag[i_best] = 0
             # arange the value in the order of chi_eff
             order = np.flip(np.argsort(r))
-            template_names, z, zerr, r, chi_eff, pkratio, note = template_names[order], z[order], zerr[order], r[order], chi_eff[order], pkratio[order], note[order]
+            template_names, z, zerr, r, chi_eff, flag,  = template_names[order], z[order], zerr[order], r[order], chi_eff[order], flag[order]
             
-            table = np.vstack((template_names, z, zerr, r, chi_eff, pkratio, note))
-            column_names = ['template_name', 'z', 'zerr', 'r', 'chi_eff', 'pkratio', 'note']
+            table = np.vstack((template_names, z, zerr, r, chi_eff, flag))
+            column_names = ['template_name', 'z', 'zerr', 'r', 'chi_eff', 'flag']
             result = pd.DataFrame(table.T, columns = column_names)
-            result = result.astype({'template_name':str, 'z':np.float32, 'zerr':np.float32, 'r':np.float32, 'chi_eff':np.float32, 'pkratio':np.float32, 'note':str})
+            result = result.astype({'template_name':str, 'z':np.float128, 'zerr':np.float128, 'r':np.float64, 'chi_eff':np.float64, 'flag':int})
             
             
                     
         
         return result
     
-    def cc_analysis(self, spectrum, temp_name, weight=True, normalization=True, spectrum_range=None, resolution=3, chi_thres=2, mask=None, knots_bin=100,
+    def cc_analysis(self, spectrum, temp_name, weight=True, normalization=True, spectrum_range=None, chi_thres=2, resolution=3, mask=None, knots_bin=100,
                     line_thres=3, apodization_size=0.05, window_continuum=100, sn_continuum=1):
         if type(temp_name) == str:
             temp_name = temp_name
@@ -544,7 +545,7 @@ class rvm:
         scale = np.median(self.cspectrum[2])
         self.cspectrum[1] /= scale
         self.cspectrum[2] /= scale
-        self.norm = process_spectrum(self.cspectrum[0], self.cspectrum[1], np.abs(self.cspectrum[3]/self.cspectrum[2]), resolution=resolution, temp_type=self.templates[temp_name][2], knots_bin = knots_bin,
+        self.norm = process_spectrum(self.cspectrum[0], self.cspectrum[1], np.abs(self.cspectrum[3]/self.cspectrum[2]), temp_type=self.templates[temp_name][2], knots_bin = knots_bin,
                                     thres=line_thres, apodization_size=apodization_size)
         self.cspectrum[3] = self.norm.new_masks
 
@@ -584,10 +585,10 @@ class rvm:
             
             def z_multi_sub(indices, subset_number, progress, **kwargs):
                 file = open(save_folder + '/z_result%d.txt' % subset_number, 'w')
-                file.write('number best_template z zerr r chi_eff pkratio\n')
+                file.write('number best_template z zerr r chi_eff flag\n')
                 for index in tqdm(indices, position=progress, leave=False, desc=f'Progress {subset_number + 1}'):
                     result = self.z_single(spectrums[index], output='best', **kwargs)
-                    file.write('%d %s %f %f %f %f %f\n' % (index, result[0], result[1],
+                    file.write('%d %s %f %f %f %f %d\n' % (index, result[0], result[1],
                                                         result[2], result[3], result[4], result[5]))
                 file.close()
                 
@@ -611,7 +612,7 @@ class rvm:
             z_result_files = np.sort(glob.glob(save_folder + '/z_result*.txt'))
 
             with open(save_folder + '/z_result.txt', 'w') as final_file:
-                final_file.write('number best_template z zerr r chi_eff pkratio\n')
+                final_file.write('number best_template z zerr r chi_eff flag\n')
                 for result_file in z_result_files:
                     with open(result_file) as file:
                         for n, line in enumerate(file):
@@ -619,7 +620,7 @@ class rvm:
                                 final_file.write(line)
             
             with open(save_folder+'/z_result.txt', 'w') as final_file:
-                final_file.write('number best_template z zerr r chi_eff pkratio\n')
+                final_file.write('number best_template z zerr r chi_eff flag\n')
                 for result_file in z_result_files:
                     with open(result_file) as file:
                         for n, line in enumerate(file):
@@ -630,9 +631,9 @@ class rvm:
         else:
             spec_number = np.arange(len(spectrums))
             file = open(save_folder+'/z_result.txt', 'w')
-            file.write('number best_template z zerr chi_eff pkratio\n')
+            file.write('number best_template z zerr chi_eff flag\n')
             for index in tqdm(spec_number, desc='Single Process Progress'):
                 result = self.z_single(spectrums[index], output='best', **kwargs)
-                file.write('%d %s %f %f %f %f %f\n'%(index, result[0], result[1],
+                file.write('%d %s %f %f %f %f %d\n'%(index, result[0], result[1],
                                                     result[2], result[3], result[4], result[5]))
             file.close()
