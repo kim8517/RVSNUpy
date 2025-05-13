@@ -607,8 +607,12 @@ class cc_result:
         gaussian_fits, fitters= [],[]
         for i in range(len(self.peak_ranges)):
             self.max_peak_range = self.peak_ranges[i]
-            cc_peak = self.cc[(self.shifted_vels>self.max_peak_range[0])&(self.shifted_vels<self.max_peak_range[1])]
-            lags_peak = self.shifted_vels[(self.shifted_vels>self.max_peak_range[0])&(self.shifted_vels<self.max_peak_range[1])]
+            peak_idx = np.where((self.shifted_vels>self.max_peak_range[0])&(self.shifted_vels<self.max_peak_range[1]))[0]
+            if len(peak_idx) <5:
+                peak_idx = np.insert(peak_idx, 0, max(peak_idx[0]-1,0))
+                peak_idx = np.insert(peak_idx, -1, min(peak_idx[0]-1,len(self.cc)-1))
+            cc_peak = self.cc[peak_idx]
+            lags_peak = self.shifted_vels[peak_idx]
             nan_filtering = (~np.isnan(cc_peak))&((~np.isnan(lags_peak)))
             cc_peak, lags_peak = cc_peak[nan_filtering], lags_peak[nan_filtering]
             
@@ -651,7 +655,7 @@ class cc_result:
             pwidth[i] = std
 
         if (len(r_values) == 0) | (np.max(r_values) ==0) :
-            self.z, self.zerr, self.r, self_chi_eff = np.nan, np.nan, np.nan, np.nan
+            self.z, self.zerr, self.r, self.chi_eff = np.nan, np.nan, np.nan, np.nan
     
         else:
             sort = np.argsort(r_values)[::-1]
@@ -774,7 +778,6 @@ class rvm:
                 spectrum[3,left_end:right_end+1] = 0
                 
         abs_spectrum, em_spectrum = copy.deepcopy(spectrum), copy.deepcopy(spectrum)
-
         
         if output=='best':
             if prior == 'abs':

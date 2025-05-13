@@ -28,75 +28,89 @@ from RVSNUpy.rvm import resampler, process_spectrum, rvm
 # synthetic template
 ##########################################################################################
 
-syn_abstemplates = {}
-for i, age in enumerate([3, 5, 7, 9, 11]):
-    temp_file = pd.read_csv(os.path.join(os.path.dirname(__file__), 'fsps_absspec.txt'), delimiter=' ')
-    wavelength, fluxes = np.array(temp_file['wavelengths']), np.array(temp_file[f'{age:d}'])
-    error, mask = np.ones_like(fluxes), np.ones_like(fluxes)
-    temp = np.vstack([wavelength, fluxes, error, mask])
-    new_wavelengths = np.logspace(np.log10(temp[0,0]), np.log10(temp[0,-1]), len(temp[0]))
-    new_fluxes, new_error = resampler(temp[0], temp[1], new_wavelengths), resampler(temp[0], temp[2], new_wavelengths)
-    new_temp = np.vstack([new_wavelengths, new_fluxes, new_error, np.ones_like(new_wavelengths)])
-    syn_abstemplates[f'{age:d}Gyr'] = [new_temp, 1]
 
-syn_emtemplates = {}
-for i, age in enumerate([0.01]):
-    temp_file = pd.read_csv(os.path.join(os.path.dirname(__file__), 'fsps_emspec.txt'), delimiter=' ')
-    wavelength, fluxes = np.array(temp_file['wavelengths']), np.array(temp_file[f'{age:.2f}'])
-    error, mask = np.ones_like(fluxes), np.ones_like(fluxes)
-    temp = np.vstack([wavelength, fluxes, error, mask])
-    new_wavelengths = np.logspace(np.log10(temp[0,0]), np.log10(temp[0,-1]), len(temp[0]))
-    new_fluxes, new_error = resampler(temp[0], temp[1], new_wavelengths), resampler(temp[0], temp[2], new_wavelengths)
-    new_temp = np.vstack([new_wavelengths, new_fluxes, new_error, np.ones_like(new_wavelengths)])
-    syn_emtemplates[f'{age:.2f}Gyr'] = [new_temp, 2]
+def syn_abstemplates(type="air"):
+    syn_abstemp = {}
+    for i, age in enumerate([3, 5, 7, 9, 11]):
+        temp_file = pd.read_csv(os.path.join(os.path.dirname(__file__), 'template_files', 'csv', 'fsps', f'fsps_absspec_{type}.txt'), delimiter=' ')
+        wavelength, fluxes = np.array(temp_file['wavelengths']), np.array(temp_file[f'{age:d}'])
+        error, mask = np.ones_like(fluxes), np.ones_like(fluxes)
+        temp = np.vstack([wavelength, fluxes, error, mask])
+        if type=="air":
+            new_wavelengths = np.logspace(np.log10(temp[0,0]), np.log10(temp[0,-1]), len(temp[0]))
+            new_fluxes, new_error = resampler(temp[0], temp[1], new_wavelengths), resampler(temp[0], temp[2], new_wavelengths)
+            new_temp = np.vstack([new_wavelengths, new_fluxes, new_error, np.ones_like(new_wavelengths)])
+        elif type=="vacuum":
+            new_temp = temp
+        syn_abstemp[f'{age:d}Gyr'] = [new_temp, 1]
+    return syn_abstemp
 
-syn_templates = {**copy.deepcopy(syn_abstemplates), **copy.deepcopy(syn_emtemplates)}
+def syn_emtemplates(type="air"):
+    syn_emtemp = {}
+    for i, age in enumerate([0.01]):
+        temp_file = pd.read_csv(os.path.join(os.path.dirname(__file__), 'template_files', 'csv', 'fsps', f'fsps_emspec_{type}.txt'), delimiter=' ')
+        wavelength, fluxes = np.array(temp_file['wavelengths']), np.array(temp_file[f'{age:.2f}'])
+        error, mask = np.ones_like(fluxes), np.ones_like(fluxes)
+        temp = np.vstack([wavelength, fluxes, error, mask])
+        if type=="air":
+            new_wavelengths = np.logspace(np.log10(temp[0,0]), np.log10(temp[0,-1]), len(temp[0]))
+            new_fluxes, new_error = resampler(temp[0], temp[1], new_wavelengths), resampler(temp[0], temp[2], new_wavelengths)
+            new_temp = np.vstack([new_wavelengths, new_fluxes, new_error, np.ones_like(new_wavelengths)])
+        elif type=="vacuum":
+            new_temp = temp
+        syn_emtemp[f'{age:.2f}Gyr'] = [new_temp, 2]
+    return syn_emtemp
+
+def syn_templates(type="air"):
+    return {**syn_abstemplates(type), **syn_emtemplates(type)}
 
 ##########################################################################################
 # sdss template
 ##########################################################################################
 
 folder_name = os.path.join(os.path.dirname(__file__), 'template_files','csv')
-sdss_galaxy_templates = {}
-abs_templates = ['Early_type_galaxy.csv', 'Luminous_red_galaxy.csv']
-em_templates = ['Late_type_galaxy.csv']
 
-for temp_file in abs_templates:
-    path = os.path.join(folder_name, 'sdss', temp_file)
-    template_data = pd.read_csv(path)
-    wavelength = np.array(template_data['wave'])
-    flux =  np.array(template_data['flux'])
-    uncertainty = np.array(template_data['uncertainty'])
-    template_name = os.path.basename(path).replace('.csv','')
-    
-    template = np.vstack([wavelength, flux, uncertainty, np.ones(len(flux))])
-    
-#     linear_wavelength = np.linspace(wavelength[0], wavelength[-1], len(wavelength))
-#     template = resampler(_template, linear_wavelength)
-    
-    
-    sdss_galaxy_templates[template_name] = [template, 1]
-    
-for temp_file in em_templates:
-    path = os.path.join(folder_name, 'sdss', temp_file)
-    template_data = pd.read_csv(path)
-    wavelength = np.array(template_data['wave'])
-    flux =  np.array(template_data['flux'])
-    uncertainty = np.array(template_data['uncertainty'])
-    template_name = os.path.basename(path).replace('.csv','')
-    
-    template = np.vstack([wavelength, flux, uncertainty, np.ones(len(flux))])
-    
-#     linear_wavelength = np.linspace(wavelength[0], wavelength[-1], len(wavelength))
-#     template = resampler(_template, linear_wavelength)
-    
-    sdss_galaxy_templates[template_name] = [template, 2]
+def sdss_galaxy_templates(type="air"):
+
+    sdss_galaxy_temps = {}
+    abs_templates = ['Early_type_galaxy', 'Luminous_red_galaxy']
+    em_templates = ['Late_type_galaxy']
+
+    for temp_name in abs_templates:
+        path = os.path.join(folder_name, 'sdss', temp_name+f'_{type}.csv')
+        template_data = pd.read_csv(path)
+        wavelength = np.array(template_data['wave'])
+        flux =  np.array(template_data['flux'])
+        uncertainty = np.array(template_data['uncertainty'])
+        
+        template = np.vstack([wavelength, flux, uncertainty, np.ones(len(flux))])
+        
+    #     linear_wavelength = np.linspace(wavelength[0], wavelength[-1], len(wavelength))
+    #     template = resampler(_template, linear_wavelength)
+        
+        
+        sdss_galaxy_temps[temp_name] = [template, 1]
+        
+    for temp_name in em_templates:
+        path = os.path.join(folder_name, 'sdss', temp_name+f'_{type}.csv')
+        template_data = pd.read_csv(path)
+        wavelength = np.array(template_data['wave'])
+        flux =  np.array(template_data['flux'])
+        uncertainty = np.array(template_data['uncertainty'])
+        
+        template = np.vstack([wavelength, flux, uncertainty, np.ones(len(flux))])
+        
+    #     linear_wavelength = np.linspace(wavelength[0], wavelength[-1], len(wavelength))
+    #     template = resampler(_template, linear_wavelength)
+        
+        sdss_galaxy_temps[temp_name] = [template, 2]
+    return sdss_galaxy_temps
 
 # ##########################################################################################
 # # calibate templates
 # ##########################################################################################
 
-def zp_calib(templates):
+def zp_calib(templates, type="air"):
     abs_templates = {}
     em_templates = {}
     for name in templates.keys():
@@ -106,7 +120,7 @@ def zp_calib(templates):
             em_templates[name] = copy.deepcopy(templates[name])
 
     zp_templates = {}
-    abssyn = rvm(syn_abstemplates, z_range=[-0.001,0.001])
+    abssyn = rvm(syn_abstemplates(type), z_range=[-0.001,0.001])
     for name in abs_templates.keys():
         temp0 = templates[name][0]
         calib = abssyn.z_single(temp0, chi_thres=0, line_fit=False)
@@ -118,7 +132,7 @@ def zp_calib(templates):
         new_wavelengths = np.logspace(np.log10(zero_wavelengths[0]), np.log10(zero_wavelengths[-1]), len(zero_wavelengths))
         new_fluxes, new_error = resampler(zero_wavelengths, temp0[1], new_wavelengths), resampler(zero_wavelengths, temp0[2], new_wavelengths)
         new_temp = np.vstack([new_wavelengths, new_fluxes, new_error, np.ones_like(new_wavelengths)])
-        zp_templates[name] = [new_temp, sdss_galaxy_templates[name][1]]
+        zp_templates[name] = [new_temp, templates[name][1]]
         
     for name in em_templates.keys():
         zp_templates[name] = [templates[name][0], templates[name][1]]

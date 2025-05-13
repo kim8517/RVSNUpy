@@ -9,7 +9,7 @@ from astropy.table import Table
 
 def vac2air(wavelength):
     sigma = 1e+4/wavelength
-    factor = 6.4328e-5+2.9481e-2/(146-sigma**2)+2.5540e-4/(41-sigma**2)
+    factor = 5.792105E-2/(238.0185 - sigma**2) + 1.67917E-3/(57.362 - sigma**2)
     return wavelength/(1+factor)
 
 def sdss_fits(file, dr=14, plotting=False):
