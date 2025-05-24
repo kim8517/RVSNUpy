@@ -6,22 +6,20 @@ from matplotlib import pyplot as plt
 from astroquery.sdss import SDSS
 from astropy.table import Table
 
-
+# Conversion function from vacuum to air wavelengths
 def vac2air(wavelength):
     sigma = 1e+4/wavelength
-    factor = 6.4328e-5+2.9481e-2/(146-sigma**2)+2.5540e-4/(41-sigma**2)
+    factor = 5.792105E-2/(238.0185 - sigma**2) + 1.67917E-3/(57.362 - sigma**2)
     return wavelength/(1+factor)
 
-def sdss_fits(file, dr=14, plotting=False):
+def sdss_fits(file, dr=14, calibration="air"):
     '''
     Parameters
     ----------
-    file : str
-        Directory of the file
-    dr : integer
-        The version of the data release of SDSS
-    plotting : bool, optional
-        If true, plot the spectrum. The default is False.
+    file : directory of the spectrum fits file
+    calibartion: wavelength calibration system
+        "air" or "vacuum"
+    dr : the version of the data release of SDSS
 
     Returns
     -------
@@ -40,12 +38,11 @@ def sdss_fits(file, dr=14, plotting=False):
         except:
             flux, wavelength, ivar, mask = np.array(data['FLUX']), np.array(data['LOGLAM']), np.array(data['IVAR']), np.array(data['AND_MASK'])
     else:
-        data = f[0].data # import data
-        header = f[0].header # import header
+        data = f[0].data
+        header = f[0].header
         f.close()
-        st = header['COEFF0'] # the lowest wavelength
-        bi = header['COEFF1'] # the bin between wavelength
-        # create the wavelength range
+        st = header['COEFF0']
+        bi = header['COEFF1']
         npix = len(data[0])
         wavelength = np.zeros(npix)
         for i in range(npix):
@@ -56,23 +53,21 @@ def sdss_fits(file, dr=14, plotting=False):
     
     ivar[ivar==0] = 1e-10
     mask = (~mask.astype(bool)).astype(int)
-    wavelength = vac2air(10**wavelength)
+    if calibration=="air":
+        wavelength = vac2air(10**wavelength)
+    elif calibration=="vacuum":
+        wavelength = 10**wavelength
+    else:
+        raise ValueError("calibration must be 'air' or 'vacuum'")
     
-    # For cross-correlation, uncertainty is processed as a standard deviation
     uncertainty = (1/np.sqrt(ivar))
     # create spectrum1D
     spectrum = np.vstack([wavelength, flux, uncertainty, mask])
     f.close()
-    if plotting:
-        plt.figure()
-        plt.step(spectrum[0,:], spectrum[1,:],'k-')
-        plt.xlabel('Wavelength (AA)')
-        plt.ylabel('Flux')
-        plt.show()
         
     return spectrum
 
-def MMT_raw(file, plotting=False):
+def MMT_raw(file):
     '''
     Parameters
     ----------
@@ -112,12 +107,6 @@ def MMT_raw(file, plotting=False):
         
     spectrum = np.vstack([wavelength, flux, uncertainty, mask])
     
-    if plotting:
-        plt.figure()
-        plt.step(spectrum[0,:], spectrum[1,:],'k-')
-        plt.xlabel('Wavelength (AA)')
-        plt.ylabel('Flux (\'erg cm-2 s-1 AA-1\')')
-        plt.show()
     f.close()
     return spectrum
 

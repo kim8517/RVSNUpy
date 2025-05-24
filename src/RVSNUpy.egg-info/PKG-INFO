@@ -1,0 +1,8 @@
+Metadata-Version: 2.1
+Name: RVSNUpy
+Version: 1.0.0.
+Summary: A redshift measurement pacakge based on inverse variance weighted cross-correlation
+Author: Taewan Kim
+Classifier: Programing Language :: Python :: 3
+Classifier: Operating System :: OS Independent
+Requires-Python: >=3.0
