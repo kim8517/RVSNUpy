@@ -1599,7 +1599,7 @@ class rvm:
         
         os.system('rm -fr %s'%save_folder+'/*.txt')
         file = open(save_folder + '/z_result.txt', 'w')
-        file.write('spectrum_path besttemp z zerr r chi_eff\n')
+        file.write('spectrum_path besttemp z zerr r chi_eff pkratio\n')
         file.close()
         
         n_subs = len(spec_files)/chunk

@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name = "RVSNUpy",
-    version = "1.0.0.",
+    version = "1.0.0",
     author = "Taewan Kim",
     description = "A redshift measurement pacakge based on inverse variance weighted cross-correlation",
     package_dir = {"":"src"},
