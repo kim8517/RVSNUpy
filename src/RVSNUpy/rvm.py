@@ -402,6 +402,8 @@ def clean_spectrum(spec, window, sn):
     window: size of the window for the S/N calculation
     sn: S/N threshold for the spectrum
     '''
+    is_nan = (np.isnan(spec[0]))|(np.isnan(spec[1]))|(np.isnan(spec[2]))|(np.isnan(spec[3]))
+    spec = spec[:,~is_nan]
     pixel_scale = np.median(spec[0,1:]-spec[0,:-1])
     window = int(window/pixel_scale)
 
