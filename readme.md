@@ -4,15 +4,15 @@
 
 ## 🔧 Installation
 
-To install RVSNUpy from GitHub:
+### Download
+
+To download RVSNUpy from GitHub:
 
 ```bash
 git clone https://github.com/kim8517/RVSNUpy.git
-cd RVSNUpy
-pip install -e .
 ```
 
-## 🌐 Environment Variable
+### Environment Variable
 
 RVSNUpy requires an environment variable `rvsnupy` that points to the root directory of this project.
 
@@ -32,6 +32,12 @@ You can confirm it’s set with:
 
 ```bash
 echo $rvsnupy
+```
+
+### Installation
+```bash
+cd RVSNUpy
+pip install .
 ```
 
 ## 📘 Documentation
