@@ -40,11 +40,12 @@ cd RVSNUpy
 pip install .
 ```
 
-## 📘 Documentation
+## How to use?
+### Quick start
+'''
 
-User manuals are currently being prepared to ensure accessibility and ease of use.  
-This process is expected to be completed by **June 2025**.  
-Thank you for your interest — please stay tuned for the release.
+'''
+For use, refer to .ipynb files in example, espeically z_measure.ipynb
 
 ## 📄 License
 
