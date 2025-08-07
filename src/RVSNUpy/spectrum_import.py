@@ -88,6 +88,7 @@ def MMT_raw(file):
     flux = (f[0].data)[0][0]
     flux = flux
     uncertainty = (f[0].data)[3][0]
+    f.close()
     
     sz = len(flux)
     crval = header['CRVAL1']

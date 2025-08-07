@@ -14,6 +14,8 @@ from joblib import Parallel, delayed
 from astropy.modeling import models, fitting
 from astropy.constants import c
 c = c.to_value('km/s')
+import matplotlib.pyplot as plt
+from scipy.signal import savgol_filter
 
 def return_nan(x):
     return np.nan
@@ -70,6 +72,11 @@ def fit_gaussian_segment(wavelengths, res, center, rend, lend, resolution, weigh
         return True, amp, center, width, stddev
     except Exception as e:
         return False, lend, center, rend
+
+
+def smooth(flux, window=50):
+    smooth_flux = savgol_filter(flux, window, 3)
+    return smooth_flux
 
 # Normalize the template
 class process_template:
@@ -972,16 +979,172 @@ class cc_result:
             self.bestfit_gaussian_cc_at_z = return_nan
                 
 
-    # def cal_chi_eff(self):
-    #     z_wavelength = self.template_spectrum[0]*(1+self.z)
-    #     self.overlap_spec = copy.deepcopy(self.spectrum)
-    #     self.overlap_spec = self.spectrum[:,(self.spectrum[0,:]>max(z_wavelength[0], self.spectrum[0,0]))&
-    #                                  (self.spectrum[0,:]<min(z_wavelength[-1], self.spectrum[0,-1]))]
-    #     self.T = resampler(z_wavelength, self.template_spectrum[1], self.overlap_spec[0])
-    #     self.T_continuum = process_template(self.overlap_spec[0], self.T, np.abs(self.overlap_spec[3]/self.overlap_spec[2]), knots_bin = self.temp_knots_bin,
-    #                                                     thres = self.temp_line_thres, apodization_size=self.temp_apodization_size)
-    #     self.T_ = self.T*self.proc_spec.continuum_fluxes[(self.spectrum[0,:]>max(z_wavelength[0], self.spectrum[0,0]))&(self.spectrum[0,:]<min(z_wavelength[-1], self.spectrum[0,-1]))]/self.T_continuum.continuum_fluxes
-    #     self.chi_eff = np.sum(((self.overlap_spec[3]/self.overlap_spec[2])**2*(self.overlap_spec[1]-self.T_)**2))/(np.sum((self.overlap_spec[3]))-len(self.T_continuum.knots)-1)
+    def diagnostic_plot(self, tempName, scale00=None, scale10=None, scale01=None, scale11=None,
+                    abs_lines = {'H & K': [3934.777, 3969.588], 'Mg': 5176.7, 'Na': 5895.6},
+                    em_lines = {'Mg II': 2799.117, 'O II': 3727.092,
+                                'Hbeta': 4862.68, '[O III]': [4960.295,5008.240],'Halpha': 6564.61},
+                    plot_abs_lines=True, plot_em_lines=True):
+        fig = plt.figure(figsize=(12,5))
+        gs = fig.add_gridspec(4,2)
+        fig.subplots_adjust(hspace=0, wspace=0.3)
+        ax00 = fig.add_subplot(gs[:3,0])
+        ax10 = fig.add_subplot(gs[3,0])
+        ax01 = fig.add_subplot(gs[:3,1])
+        ax11 = fig.add_subplot(gs[3,1])
+        ax00.tick_params(axis='x', labelsize=0)
+        ax01.tick_params(axis='x', labelsize=0)
+
+
+        # ax00: original and smooothed spectra
+        # smoothed spectrum
+        ax00.plot(self.spectrum[0],
+                smooth(self.spectrum[1]),
+                color='k')
+
+        if scale00 == 'smooth':
+            ylim00 = ax00.get_ylim()
+        # original spectrum
+        ax00.plot(self.spectrum[0],
+                self.spectrum[1],
+                color='k', alpha=0.5, lw=1)
+        # panel setting
+        if scale00=='smooth':
+            ax00.set_ylim(ylim00[0], ylim00[1])
+        ax00.set_ylabel(r"$F_\lambda$", fontsize=20)
+        ax00.set_xlim(self.spectrum[0,0], self.spectrum[0,-1])
+
+
+        # ax10: noramalized and smoothed normalized spectra
+        # smoothed normalized spectrum
+        ax10.plot(self.spectrum[0],
+                smooth(self.proc_spec.normalized_fluxes),
+                color='k')
+        if scale10 == 'smooth':
+            ylim10 = ax10.get_ylim()
+        # normalized spectrum
+        ax10.plot(self.spectrum[0],
+                self.proc_spec.normalized_fluxes,
+                color='k', alpha=0.5, lw=1)
+        # panel setting
+        if scale10 == 'smooth':
+            ax10.set_ylim(ylim10[0], ylim10[1])
+        ax10.set_xlim(self.spectrum[0,0], self.spectrum[0,-1])
+
+        ax10.set_xlabel(r"$\lambda~({\rm  \AA})$", fontsize=20)
+        ax10.set_ylabel(r"$F_\lambda/F_{\lambda, {\rm conti}}$", fontsize=20)
+
+        # marking spectral lines
+        if plot_abs_lines:
+            for lineName in abs_lines.keys():
+                lambs = abs_lines[lineName]
+                if isinstance(lambs, (list, tuple, np.ndarray)):
+                    mark = False
+                    for lamb in lambs:
+                        shifted_lamb = (1+self.z)*lamb
+                        if (shifted_lamb>self.spectrum[0,0])&(shifted_lamb<self.spectrum[0,-1]):
+                            ax00.axvline(shifted_lamb, color='#FF7F00', linestyle=':')
+                            ax10.axvline(shifted_lamb, color='#FF7F00', linestyle=':')
+                            mark = True
+                    if mark:
+                        ax00.annotate(lineName, xy=((1+self.z)*np.median(lambs), 1),
+                                    xycoords=("data", "axes fraction"), 
+                                                xytext=(0,1.5),
+                                                textcoords="offset fontsize",
+                                                arrowprops=dict(arrowstyle="->", lw=1.5),
+                                                ha="center", va="center", fontsize=10, color='#FF7F00')
+                elif isinstance(lambs, (int, float)):
+                    lamb = lambs
+                    shifted_lamb = (1+self.z)*lamb
+                    if (shifted_lamb>self.spectrum[0,0])&(shifted_lamb<self.spectrum[0,-1]):
+                        ax00.axvline(shifted_lamb, color='#FF7F00', linestyle=':')
+                        ax10.axvline(shifted_lamb, color='#FF7F00', linestyle=':')
+                        ax00.annotate(lineName, xy=(shifted_lamb, 1),
+                                    xycoords=("data", "axes fraction"), 
+                                                xytext=(0,1.5),
+                                                textcoords="offset fontsize",
+                                                arrowprops=dict(arrowstyle="->", lw=1.5),
+                                                ha="center", va="center", fontsize=10, color='#FF7F00')
+                else:
+                    raise ValueError('wavelength of a line should be a list or float')
+        if plot_em_lines:
+            for lineName in em_lines.keys():
+                lambs = em_lines[lineName]
+                if isinstance(lambs, (list, tuple, np.ndarray)):
+                    mark = False
+                    for lamb in lambs:
+                        shifted_lamb = (1+self.z)*lamb
+                        if (shifted_lamb>self.spectrum[0,0])&(shifted_lamb<self.spectrum[0,-1]):
+                            ax00.axvline(shifted_lamb, color='#377EB8', linestyle=':')
+                            ax10.axvline(shifted_lamb, color='#377EB8', linestyle=':')
+                            mark = True
+                    if mark:
+                        ax00.annotate(lineName, xy=((1+self.z)*np.median(lambs), 1),
+                                    xycoords=("data", "axes fraction"), 
+                                                xytext=(0,2.5),
+                                                textcoords="offset fontsize",
+                                                arrowprops=dict(arrowstyle="->", lw=1.5),
+                                                ha="center", va="center", fontsize=10, color='#377EB8')
+                elif isinstance(lambs, (int, float)):
+                    lamb = lambs
+                    shifted_lamb = (1+self.z)*lamb
+                    if (shifted_lamb>self.spectrum[0,0])&(shifted_lamb<self.spectrum[0,-1]):
+                        ax00.axvline(shifted_lamb, color='#377EB8', linestyle=':')
+                        ax10.axvline(shifted_lamb, color='#377EB8', linestyle=':')
+                        ax00.annotate(lineName, xy=(shifted_lamb, 1), xycoords=("data", "axes fraction"), 
+                                                xytext=(0,2.5),
+                                                textcoords="offset fontsize",
+                                                arrowprops=dict(arrowstyle="->", lw=1.5),
+                                                ha="center", va="center", fontsize=10, color='#377EB8')
+                else:
+                    raise ValueError('wavelength of a line should be a list or float')
+                
+        # ax01: cross-correlatio signals
+        ax01.plot(self.shifted_vels/c, self.cc, color='k')
+        cxx = np.linspace(self.shifted_vels[0],
+                        self.shifted_vels[-1],
+                        100000)
+        ax01.plot(cxx/c, 
+                self.bestfit_gaussian_cc_at_z(cxx),
+                ':')
+        ax01.axvline(self.z, linestyle=':')
+        # panel setting
+        if scale01 == 'peak':
+            ax01.set_xlim((self.bestfit_gaussian_cc_at_z.mean
+                        -5*self.bestfit_gaussian_cc_at_z.stddev.value)/c,
+                        (self.bestfit_gaussian_cc_at_z.mean
+                        +5*self.bestfit_gaussian_cc_at_z.stddev.value)/c)
+        else:
+            ax01.set_xlim(self.z_range[0], self.z_range[1])
+        ax01.set_ylabel(r"C.C.($z$)")
+        
+        # ax11: effective chi square
+        try:
+            ax11.scatter(self.zs, self.line_chi_effs, marker='x')
+            ylim11 = ax11.get_ylim()
+        except:
+            pass
+        ax11.plot(self.shifted_vels/c, self.chi_effs, color='k')
+
+        # panel setting
+        if scale01 == 'peak':
+            ax11.set_xlim((self.bestfit_gaussian_cc_at_z.mean
+                        -5*self.bestfit_gaussian_cc_at_z.stddev.value)/c,
+                        (self.bestfit_gaussian_cc_at_z.mean
+                        +5*self.bestfit_gaussian_cc_at_z.stddev.value)/c)
+        else:
+            ax11.set_xlim(self.z_range[0], self.z_range[1])
+        if scale11 == 'line_chi_eff':
+            try:
+                ax11.set_ylim(ylim11[1], ylim11[0])
+            except:
+                pass
+        else:
+            ax11.invert_yaxis()
+        ax11.set_xlabel(r"$z$")
+        ax11.set_ylabel(r"$\chi^2_{\rm eff}$")
+        
+        return ax00, ax01, ax10, ax11
+        
 
 
 
