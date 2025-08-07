@@ -979,7 +979,7 @@ class cc_result:
             self.bestfit_gaussian_cc_at_z = return_nan
                 
 
-    def diagnostic_plot(self, tempName, scale00=None, scale10=None, scale01=None, scale11=None,
+    def diagnostic_plot(self, scale00=None, scale10=None, scale01=None, scale11=None,
                     abs_lines = {'H & K': [3934.777, 3969.588], 'Mg': 5176.7, 'Na': 5895.6},
                     em_lines = {'Mg II': 2799.117, 'O II': 3727.092,
                                 'Hbeta': 4862.68, '[O III]': [4960.295,5008.240],'Halpha': 6564.61},
