@@ -137,3 +137,6 @@ def MMT_flux(file):
     spectrum = np.vstack([wavelength, flux, uncertainty, mask])
     f.close()
     return spectrum
+
+
+

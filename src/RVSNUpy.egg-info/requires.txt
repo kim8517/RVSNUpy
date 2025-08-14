@@ -4,3 +4,4 @@ astropy
 joblib
 tqdm
 pandas
+matplotlib
