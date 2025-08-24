@@ -2,6 +2,9 @@
 
 **RVSNUpy** is a Python package for spectroscopic redshift measurement based on inverse-variance-weighted cross-correlation.
 
+## Reference
+[Kim et al. 2025b](https://github.com/kim8517/RVSNUpy)
+
 ## 🔧 Installation
 
 ### Download
