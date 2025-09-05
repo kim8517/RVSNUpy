@@ -682,7 +682,8 @@ class cc_result:
                  temp_resolution=3, z_range=[-0.01,2], line_fit = True,
                  em_lines=[2799.117, 3727.30, 4102.89, 4341.68, 4861.33, [4958.91, 5006.84], [6548.06, 6562.82, 6583.57], [6716.440, 6730.815]], 
                  resolution=3,
-                 n_jobs=-1):
+                 n_jobs=-1,
+                 force_to_measure=True):
         '''
         spectrum: a spectrum array (4, n_pixel)
         proc_spec: class of process_spectrum for the spectrum
@@ -698,6 +699,7 @@ class cc_result:
         em_lines: the list of emission lines used for the line fitting for the redshift measurement
         resolution: resolution of the template
         n_jobs: the number of jobs for parallel processing. If n_jobs = -1, all available resources are used
+        force_to_measure: if True, the code will return nan if the cross-correlation fails. Otherwise, it will raise an error.
         '''
         warnings.simplefilter('ignore')
         self.spectrum, self.proc_spec = spectrum, proc_spec
@@ -708,11 +710,14 @@ class cc_result:
         self.em_lines, self.resolution = em_lines, resolution
         self.shifted_vels, self.shifted_wavelengths, self.shifted_fluxes, self.template_spectrum = self.shifted_template[0], self.shifted_template[1], self.shifted_template[2], self.template[0]
         self.n_jobs = n_jobs
-        # self.cross_correlate()
-        try: # perfrom cross-correlation
+
+        if force_to_measure:
+            try: # perfrom cross-correlation
+                self.cross_correlate()
+            except: # if the cross-correlation fails, set the results to NaN
+                self.z, self.zerr, self.r, self.chi_eff  = np.nan, np.nan, np.nan, np.nan
+        else:
             self.cross_correlate()
-        except: # if the cross-correlation fails, set the results to NaN
-            self.z, self.zerr, self.r, self.chi_eff  = np.nan, np.nan, np.nan, np.nan
     
     # Perfrom an inverse-variance weighted cross-correlation
     def cross_correlate(self):
@@ -1230,7 +1235,8 @@ class rvm:
     def z_abs_em(self, spectrum, resolution=3, chi_thres=4, r_thres=5, 
                  knots_bin=100, line_thres=3, apodization_size=0.05,
                  line_fit = True,
-                 em_lines=[2798.00, 3727.30, 4861.33, [4958.91, 5006.84], [6548.06, 6562.82, 6583.57], [6716.440, 6730.815]]):
+                 em_lines=[2798.00, 3727.30, 4861.33, [4958.91, 5006.84], [6548.06, 6562.82, 6583.57], [6716.440, 6730.815]],
+                 force_to_measure=True):
         
         # Spectrum for the cross-correlation with absorption and emission templates
         abs_spectrum, em_spectrum = copy.deepcopy(spectrum), copy.deepcopy(spectrum)
@@ -1252,7 +1258,8 @@ class rvm:
                                     temp_apodization_size=self.temp_apodization_size,
                                     temp_knots_bin=self.temp_knots_bin, temp_line_thres=self.temp_line_thres, temp_resolution=self.temp_resolution,
                                     z_range=self.z_range, line_fit=line_fit,
-                                    em_lines=em_lines, resolution=resolution, n_jobs=self.n_jobs)
+                                    em_lines=em_lines, resolution=resolution, n_jobs=self.n_jobs,
+                                    force_to_measure=force_to_measure)
             z1[i], zerr1[i], r1[i], chi_eff1[i] = cc_spec_temp.z, cc_spec_temp.zerr, cc_spec_temp.r, cc_spec_temp.chi_eff
         
         # remove the results with nan-redshift, chi_eff>chi_thres, and r<r_thres
@@ -1285,7 +1292,8 @@ class rvm:
                                         temp_apodization_size=self.temp_apodization_size,
                                         temp_knots_bin=self.temp_knots_bin, temp_line_thres=self.temp_line_thres, temp_resolution=self.temp_resolution,
                                         z_range=self.z_range, line_fit=line_fit,
-                                        em_lines=em_lines, resolution=resolution, n_jobs=self.n_jobs)
+                                        em_lines=em_lines, resolution=resolution, n_jobs=self.n_jobs,
+                                        force_to_measure=force_to_measure)
                 z2[i], zerr2[i], r2[i], chi_eff2[i] = cc_spec_temp.z, cc_spec_temp.zerr, cc_spec_temp.r, cc_spec_temp.chi_eff
             
             # remove the results with nan-redshift, chi_eff>chi_thres, and r<r_thres
@@ -1307,7 +1315,8 @@ class rvm:
     def z_em_abs(self, spectrum, resolution=3, chi_thres=4, r_thres=5, 
                  knots_bin=100, line_thres=3, apodization_size=0.05,
                  line_fit = True,
-                 em_lines=[2798.00, 3727.30, 4861.33, [4958.91, 5006.84], [6548.06, 6562.82, 6583.57], [6716.440, 6730.815]]):
+                 em_lines=[2798.00, 3727.30, 4861.33, [4958.91, 5006.84], [6548.06, 6562.82, 6583.57], [6716.440, 6730.815]],
+                 force_to_measure=True):
         # Spectrum for the cross-correlation with absorption and emission templates
         abs_spectrum, em_spectrum = copy.deepcopy(spectrum), copy.deepcopy(spectrum)
         
@@ -1328,7 +1337,8 @@ class rvm:
                                     temp_apodization_size=self.temp_apodization_size,
                                     temp_knots_bin=self.temp_knots_bin, temp_line_thres=self.temp_line_thres, temp_resolution=self.temp_resolution,
                                     z_range=self.z_range, line_fit=line_fit,
-                                    em_lines=em_lines, resolution=resolution, n_jobs=self.n_jobs)
+                                    em_lines=em_lines, resolution=resolution, n_jobs=self.n_jobs,
+                                    force_to_measure=force_to_measure)
             z2[i], zerr2[i], r2[i], chi_eff2[i] = cc_spec_temp.z, cc_spec_temp.zerr, cc_spec_temp.r, cc_spec_temp.chi_eff
             
         # Remove the results with nan-redshift, chi_eff>chi_thres, and r<r_thres
@@ -1362,7 +1372,8 @@ class rvm:
                                         temp_apodization_size=self.temp_apodization_size,
                                         temp_knots_bin=self.temp_knots_bin, temp_line_thres=self.temp_line_thres, temp_resolution=self.temp_resolution,
                                         z_range=self.z_range, line_fit=line_fit,
-                                        em_lines=em_lines, resolution=resolution, n_jobs=self.n_jobs)
+                                        em_lines=em_lines, resolution=resolution, n_jobs=self.n_jobs,
+                                        force_to_measure=force_to_measure)
                 z1[i], zerr1[i], r1[i], chi_eff1[i] = cc_spec_temp.z, cc_spec_temp.zerr, cc_spec_temp.r, cc_spec_temp.chi_eff
             
             # Remove the results with nan-redshift, chi_eff>chi_thres, and r<r_thres
@@ -1384,7 +1395,8 @@ class rvm:
     def z_all_templates(self, spectrum, prior='abs', output='all', resolution=3, chi_thres=4, r_thres=5, 
                  knots_bin=100, line_thres=3, apodization_size=0.05,
                  line_fit = True,
-                 em_lines=[2798.00, 3727.30, 4861.33, [4958.91, 5006.84], [6548.06, 6562.82, 6583.57], [6716.440, 6730.815]]):
+                 em_lines=[2798.00, 3727.30, 4861.33, [4958.91, 5006.84], [6548.06, 6562.82, 6583.57], [6716.440, 6730.815]],
+                 force_to_measure=True):
         # Spectrum for the cross-correlation with absorption and emission templates
         abs_spectrum, em_spectrum = copy.deepcopy(spectrum), copy.deepcopy(spectrum)
         
@@ -1403,7 +1415,8 @@ class rvm:
                                     temp_apodization_size=self.temp_apodization_size,
                                     temp_knots_bin=self.temp_knots_bin, temp_line_thres=self.temp_line_thres, temp_resolution=self.temp_resolution,
                                     z_range=self.z_range, line_fit=line_fit,
-                                    em_lines=em_lines, resolution=resolution, n_jobs=self.n_jobs)
+                                    em_lines=em_lines, resolution=resolution, n_jobs=self.n_jobs,
+                                    force_to_measure=force_to_measure)
             self.cc_result[temp_name] = cc_spec_temp
             z1[i], zerr1[i], r1[i], chi_eff1[i] = cc_spec_temp.z, cc_spec_temp.zerr, cc_spec_temp.r, cc_spec_temp.chi_eff
                 
@@ -1434,7 +1447,9 @@ class rvm:
                                     temp_apodization_size=self.temp_apodization_size,
                                     temp_knots_bin=self.temp_knots_bin, temp_line_thres=self.temp_line_thres, temp_resolution=self.temp_resolution,
                                     z_range=self.z_range, line_fit=line_fit,
-                                    em_lines=em_lines, resolution=resolution)
+                                    em_lines=em_lines, resolution=resolution,
+                                    n_jobs=self.n_jobs,
+                                    force_to_measure=force_to_measure)
             self.cc_result[temp_name] = cc_spec_temp
             z2[i], zerr2[i], r2[i], chi_eff2[i] = cc_spec_temp.z, cc_spec_temp.zerr, cc_spec_temp.r, cc_spec_temp.chi_eff
                 
