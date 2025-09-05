@@ -1148,7 +1148,7 @@ class cc_result:
         ax11.set_xlabel(r"$z$")
         ax11.set_ylabel(r"$\chi^2_{\rm eff}$")
         
-        return ax00, ax01, ax10, ax11
+        return fig, (ax00, ax01, ax10, ax11)
         
 
 
