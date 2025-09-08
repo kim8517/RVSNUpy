@@ -1120,7 +1120,7 @@ class cc_result:
                         +5*self.bestfit_gaussian_cc_at_z.stddev.value)/c)
         else:
             ax01.set_xlim(self.z_range[0], self.z_range[1])
-        ax01.set_ylabel(r"C.C.($z$)")
+        ax01.set_ylabel(r"C.C.($z$)", fontsize=20)
         
         # ax11: effective chi square
         try:
@@ -1145,8 +1145,8 @@ class cc_result:
                 pass
         else:
             ax11.invert_yaxis()
-        ax11.set_xlabel(r"$z$")
-        ax11.set_ylabel(r"$\chi^2_{\rm eff}$")
+        ax11.set_xlabel(r"$z$", fontsize=20)
+        ax11.set_ylabel(r"$\chi^2_{\rm eff}$", fontsize=20)
         
         return fig, (ax00, ax01, ax10, ax11)
         
