@@ -608,7 +608,7 @@ def fit_multiline(wavelengths, fluxes, weights, lines, z, zerr, cc_width, resolu
 # Zoom-in cross-correlation
 def sub_interp_fluxes(idx_cc, spectrum, proc_spec, ext_wavelengths, shifted_wavelengths, shifted_vels,
                       template_spectrum, template_lines, ext_fit_weights, temp_knots_bin, temp_resolution,
-                      temp_line_thres, temp_apodization_size, n_jobs=-1):
+                      temp_line_thres, temp_apodization_size, n_jobs=-1, forCheck=False):
     '''
     idx_shift: index of the cross-correlation signals to be computed
     spectrum: a spectrum array (4, n_pixel)
@@ -623,6 +623,7 @@ def sub_interp_fluxes(idx_cc, spectrum, proc_spec, ext_wavelengths, shifted_wave
     temp_knots_bin: the size of the knots for the template
     temp_line_thres: threshold for line detection
     temp_apodization_size: size of the Tukey window for the apodization for the template
+    forCheck: if True, return the resampled template wavelengths, fluxes, and the processed template class for checking purpose
     
     return
     pix_overlap: the pixels of the spectrum overlapped with the template.
@@ -673,7 +674,10 @@ def sub_interp_fluxes(idx_cc, spectrum, proc_spec, ext_wavelengths, shifted_wave
     n_knots_eff = len(pro_temp.knots[(pro_temp.knots>=lamb_min)&(pro_temp.knots<lamb_max)])
     chi_eff = np.sum(res)/(np.sum((overlap_spec[3]))-n_knots_eff-1)
     
-    return pix_overlap, pro_temp.normalized_fluxes, chi_eff
+    if forCheck:
+        return new_template_wavelengths[overlap_temp_region], T_, pro_temp.continuum_fluxes[overlap_temp_region], pro_temp.normalized_fluxes[overlap_temp_region]
+    else:
+        return pix_overlap, pro_temp.normalized_fluxes, chi_eff
 
 # Cross-correlate the spectrum with the template
 class cc_result:
@@ -831,7 +835,7 @@ class cc_result:
             
             # Arrays to store the normalized resampled template fluxes and the effective chi squares at each lag
             # where the zoomed-in cross-correlation is performed
-            normalized_resampled_template_fluxes_fluxes = np.zeros((len(idxs_within_peak),len(self.ext_fluxes))) # 
+            normalized_resampled_template_fluxes = np.zeros((len(idxs_within_peak),len(self.ext_fluxes))) # 
             chi_effs_ = np.zeros(len(idxs_within_peak))
             
             # Define spectral lines in the template based on the wieght from the extended spectrum
@@ -857,12 +861,12 @@ class cc_result:
                                                                             temp_knots_bin = self.temp_knots_bin, temp_resolution = self.temp_resolution,
                                                                             temp_line_thres = self.temp_line_thres, temp_apodization_size = self.temp_apodization_size) for i in idxs_within_peak)
             for n, (pix_overlap_at_shift, normalized_resampled_template_flux_at_shift, chi_eff_at_shift) in enumerate(process_temp_result):
-                normalized_resampled_template_fluxes_fluxes[n, pix_overlap_at_shift] = normalized_resampled_template_flux_at_shift
+                normalized_resampled_template_fluxes[n, pix_overlap_at_shift] = normalized_resampled_template_flux_at_shift
                 chi_effs_[n] = chi_eff_at_shift
 
             # Perform the zoomed-in cross-correlation and replace the initial broad cross-correlation signals
             # with the zoomed-in cross-correlation signals at each lag within the peak
-            weight_cc = np.matmul(normalized_resampled_template_fluxes_fluxes,self.ext_masks*self.ext_weights**2*self.ext_fluxes)
+            weight_cc = np.matmul(normalized_resampled_template_fluxes,self.ext_masks*self.ext_weights**2*self.ext_fluxes)
             self.cc[idxs_within_peak] = weight_cc
             # Also add the effective chi squares at each lag within the peak
             self.chi_effs[idxs_within_peak] = chi_effs_
@@ -982,6 +986,46 @@ class cc_result:
         else:
             self.z, self.zerr, self.r, self.chi_eff = np.nan, np.nan, np.nan, np.nan
             self.bestfit_gaussian_cc_at_z = return_nan
+            
+            
+    def TemplateAtZ(self, z):
+        '''
+        Generate the template spectrum at the input redshift based on the zoomed-in cross-correlation result
+        '''
+        if (z < self.z_range[0]) or (z > self.z_range[1]):
+            raise ValueError("Requested redshift is outside the template shift range.")
+        idx = np.abs(self.shifted_vels - z*c).argmin() # index of the lag closest to the input redshift
+        
+        is_in_peaks = False
+        for m, peak_range in enumerate(self.peak_ranges):
+            idxs_within_peak = np.where((self.shifted_vels>peak_range[0])&(self.shifted_vels<peak_range[1]))[0]
+            if idx in idxs_within_peak:
+                is_in_peaks = True
+                break
+        
+        if is_in_peaks:
+            i = int(np.median(idxs_within_peak))
+        else:
+            i = idx
+            
+        overlap_region_in_spectrum = ((self.ext_wavelengths>=self.shifted_wavelengths[i])&(self.ext_wavelengths<=self.shifted_wavelengths[i+self.template_spectrum.shape[1]-1]))
+        overlap_template_wavelengths = self.ext_wavelengths[overlap_region_in_spectrum]
+        resampled_template_fluxes = resampler(self.shifted_wavelengths[i:i+self.template_spectrum.shape[1]], self.template_spectrum[1], overlap_template_wavelengths)
+        template_lines = process_template(overlap_template_wavelengths, resampled_template_fluxes, self.ext_fit_weights[overlap_region_in_spectrum],
+                                            resolution = self.temp_resolution, knots_bin = self.temp_knots_bin,
+                                            thres = self.temp_line_thres, apodization_size=self.temp_apodization_size, n_jobs=self.n_jobs).lines
+        template_lines_at_rest = []
+        for line in template_lines:
+            template_lines_at_rest.append([line[0]/(1+self.shifted_vels[i]/c), line[1]/(1+self.shifted_vels[i]/c)])
+                
+        check_template = sub_interp_fluxes(idx_cc=idx, spectrum=self.spectrum, proc_spec=self.proc_spec,
+                                           ext_wavelengths = self.ext_wavelengths, shifted_wavelengths=self.shifted_wavelengths,
+                                           shifted_vels = self.shifted_vels, template_spectrum = self.template_spectrum,
+                                           template_lines = template_lines_at_rest, ext_fit_weights = self.ext_fit_weights,
+                                           temp_knots_bin = self.temp_knots_bin, temp_resolution = self.temp_resolution,
+                                           temp_line_thres = self.temp_line_thres, temp_apodization_size = self.temp_apodization_size,
+                                           forCheck=True)
+        return check_template
                 
 
     def diagnostic_plot(self, scale00=None, scale10=None, scale01=None, scale11=None,
@@ -989,6 +1033,9 @@ class cc_result:
                     em_lines = {'Mg II': 2799.117, 'O II': 3727.092,
                                 'Hbeta': 4862.68, '[O III]': [4960.295,5008.240],'Halpha': 6564.61},
                     plot_abs_lines=True, plot_em_lines=True):
+        
+        lambT, FluxT, contiT, normFluxT = self.TemplateAtZ(self.z)
+        
         fig = plt.figure(figsize=(12,5))
         gs = fig.add_gridspec(4,2)
         fig.subplots_adjust(hspace=0, wspace=0.3)
@@ -1012,6 +1059,8 @@ class cc_result:
         ax00.plot(self.spectrum[0],
                 self.spectrum[1],
                 color='k', alpha=0.5, lw=1)
+        # template
+        ax00.plot(lambT, FluxT)
         # panel setting
         if scale00=='smooth':
             ax00.set_ylim(ylim00[0], ylim00[1])
@@ -1030,6 +1079,8 @@ class cc_result:
         ax10.plot(self.spectrum[0],
                 self.proc_spec.normalized_fluxes,
                 color='k', alpha=0.5, lw=1)
+        # normalized template
+        ax10.plot(lambT, normFluxT)
         # panel setting
         if scale10 == 'smooth':
             ax10.set_ylim(ylim10[0], ylim10[1])
@@ -1148,7 +1199,7 @@ class cc_result:
         ax11.set_xlabel(r"$z$")
         ax11.set_ylabel(r"$\chi^2_{\rm eff}$")
         
-        return ax00, ax01, ax10, ax11
+        return fig, (ax00, ax01, ax10, ax11)
         
 
 
