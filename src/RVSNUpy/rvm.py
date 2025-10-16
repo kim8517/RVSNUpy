@@ -1034,7 +1034,11 @@ class cc_result:
                                 'Hbeta': 4862.68, '[O III]': [4960.295,5008.240],'Halpha': 6564.61},
                     plot_abs_lines=True, plot_em_lines=True):
         
-        lambT, FluxT, contiT, normFluxT = self.TemplateAtZ(self.z)
+        if np.isnan(self.z):
+            template_plot=False
+        else:
+            template_plot=True
+            lambT, FluxT, contiT, normFluxT = self.TemplateAtZ(self.z)
         
         fig = plt.figure(figsize=(12,5))
         gs = fig.add_gridspec(4,2)
@@ -1060,7 +1064,8 @@ class cc_result:
                 self.spectrum[1],
                 color='k', alpha=0.5, lw=1)
         # template
-        ax00.plot(lambT, FluxT)
+        if template_plot:
+            ax00.plot(lambT, FluxT)
         # panel setting
         if scale00=='smooth':
             ax00.set_ylim(ylim00[0], ylim00[1])
@@ -1080,7 +1085,8 @@ class cc_result:
                 self.proc_spec.normalized_fluxes,
                 color='k', alpha=0.5, lw=1)
         # normalized template
-        ax10.plot(lambT, normFluxT)
+        if template_plot:
+            ax10.plot(lambT, normFluxT)
         # panel setting
         if scale10 == 'smooth':
             ax10.set_ylim(ylim10[0], ylim10[1])
