@@ -406,7 +406,7 @@ import copy
 def clean_spectrum(spec, window, sn):
     '''
     spec: spectrum array (4, n_pixel)
-    window: size of the window for the S/N calculation
+    window: size of the window for the S/N calculation in Angstrom
     sn: S/N threshold for the spectrum
     '''
     is_nan = (np.isnan(spec[0]))|(np.isnan(spec[1]))|(np.isnan(spec[2]))|(np.isnan(spec[3]))
@@ -687,7 +687,8 @@ class cc_result:
                  em_lines=[2799.117, 3727.30, 4102.89, 4341.68, 4861.33, [4958.91, 5006.84], [6548.06, 6562.82, 6583.57], [6716.440, 6730.815]], 
                  resolution=3,
                  n_jobs=-1,
-                 force_to_measure=True):
+                 force_to_measure=True,
+                 r_ratio=0.5):
         '''
         spectrum: a spectrum array (4, n_pixel)
         proc_spec: class of process_spectrum for the spectrum
@@ -698,12 +699,12 @@ class cc_result:
         temp_line_thres: threshold for line detection for the template
         temp_resolution: the spectral resoltuion of the template
         z_range: redshift range for the shifted template
-        r_thres: threshold for the cross-correlation signal
         line_fit: if True, line fitting is performed for redshift measurement for the emission template
         em_lines: the list of emission lines used for the line fitting for the redshift measurement
         resolution: resolution of the template
         n_jobs: the number of jobs for parallel processing. If n_jobs = -1, all available resources are used
         force_to_measure: if True, the code will return nan if the cross-correlation fails. Otherwise, it will raise an error.
+        r_ratio: ratio between the highest and the second highest cross-correlation peaks for a reliable redshift measurement
         '''
         warnings.simplefilter('ignore')
         self.spectrum, self.proc_spec = spectrum, proc_spec
@@ -714,12 +715,13 @@ class cc_result:
         self.em_lines, self.resolution = em_lines, resolution
         self.shifted_vels, self.shifted_wavelengths, self.shifted_fluxes, self.template_spectrum = self.shifted_template[0], self.shifted_template[1], self.shifted_template[2], self.template[0]
         self.n_jobs = n_jobs
+        self.r_ratio = r_ratio
 
         if force_to_measure:
             try: # perfrom cross-correlation
                 self.cross_correlate()
             except: # if the cross-correlation fails, set the results to NaN
-                self.z, self.zerr, self.r, self.chi_eff  = np.nan, np.nan, np.nan, np.nan
+                self.z, self.zerr, self.r, self.chi_eff, self.note  = np.nan, np.nan, np.nan, np.nan, 'cross-correlation failed'
         else:
             self.cross_correlate()
     
@@ -732,7 +734,7 @@ class cc_result:
             self.determine_z()
         else:
             self.cc = self.cc0
-            self.z, self.zerr, self.r, self.chi_eff  = np.nan, np.nan, np.nan, np.nan
+            self.z, self.zerr, self.r, self.chi_eff, self.note  = np.nan, np.nan, np.nan, np.nan, 'no significant peak found in cross-correlation'
     
     # initial broad cross-correlation
     def initial_broad_cross_correlation(self):
@@ -854,7 +856,7 @@ class cc_result:
                 template_lines_at_rest.append([line[0]/(1+self.shifted_vels[i]/c), line[1]/(1+self.shifted_vels[i]/c)])
             
             # resample and process the template at each lag within the peak in parallel
-            process_temp_result = Parallel(n_jobs=-1)(delayed(sub_interp_fluxes)(idx_cc=i, spectrum=self.spectrum, proc_spec=self.proc_spec,
+            process_temp_result = Parallel(n_jobs=self.n_jobs)(delayed(sub_interp_fluxes)(idx_cc=i, spectrum=self.spectrum, proc_spec=self.proc_spec,
                                                                             ext_wavelengths = self.ext_wavelengths, shifted_wavelengths=self.shifted_wavelengths,
                                                                             shifted_vels = self.shifted_vels, template_spectrum = self.template_spectrum,
                                                                             template_lines = template_lines_at_rest, ext_fit_weights = self.ext_fit_weights,
@@ -979,14 +981,32 @@ class cc_result:
                             self.z, self.zerr, self.r = self.zs[i], self.zerrs[i], self.r_values[i]
                             self.bestfit_gaussian_cc_at_z = self.bestfit_gaussians_cc[i]
                     self.chi_eff = chi_min
+                
             else:
+                self.note = 'invalid template type'
                 raise ValueError('template[1] should be 1 or 2')
+            
+            # Assess the reliability of the redshift measurement based on the r-value ratio
+            if len(self.r_values) > 1:
+                if np.sort(self.r_values/self.r)[-2] > self.r_ratio:
+                    self.note = 'possible redshift confusion'
+                else:
+                    self.note = 'good'
+            else:
+                self.note = 'good'
         # If there is no redshift candidate with the r-value larger than 0,
         # set the redshift measurement result to NaN
         else:
-            self.z, self.zerr, self.r, self.chi_eff = np.nan, np.nan, np.nan, np.nan
+            self.z, self.zerr, self.r, self.chi_eff, self.note = np.nan, np.nan, np.nan, np.nan, 'no significant cross-correlation peak'
             self.bestfit_gaussian_cc_at_z = return_nan
-            
+
+        # If there is no redshift candidate with the r-value larger than 0,
+        # set the redshift measurement result to NaN
+        if self.r <= 0:
+            self.z, self.zerr, self.r, self.chi_eff, self.note = np.nan, np.nan, np.nan, np.nan, 'no significant cross-correlation peak'
+
+        if not hasattr(self, 'note'):
+            self.note = 'undefined'
             
     def TemplateAtZ(self, z):
         '''
@@ -1233,7 +1253,7 @@ class rvm:
         for name in self.templates.keys():
             if self.templates[name][1] == 1:
                 self.templates1[name] = copy.deepcopy(self.templates[name])
-            if templates[name][1] == 2:
+            if self.templates[name][1] == 2:
                 self.templates2[name] = copy.deepcopy(self.templates[name])
         
         self.shifted_templates = shift_templates(templates=self.templates, z_range=self.z_range, apodization_size=self.temp_apodization_size, knots_bin=self.temp_knots_bin, thres = self.temp_line_thres, resolution=self.temp_resolution, n_jobs=self.n_jobs)
@@ -1266,7 +1286,10 @@ class rvm:
         
         # Clean the spectrum by removing the left/right end where S/N is low
         spectrum = clean_spectrum(spectrum, window_continuum, sn_continuum)
-        # Resacle the spectrum for flux uncertainty not to be too larger than 1
+        
+        # Replace zero flux with a small value
+        spectrum[1,spectrum[1,:]==0] = 1e-10*np.min(np.abs(spectrum[1,spectrum[1,:]!=0]))
+        # Rescale the spectrum for flux uncertainty not to be too larger than 1
         scale = np.median(spectrum[2])
         spectrum[1] /= scale
         spectrum[2] /= scale
@@ -1293,7 +1316,7 @@ class rvm:
                  knots_bin=100, line_thres=3, apodization_size=0.05,
                  line_fit = True,
                  em_lines=[2798.00, 3727.30, 4861.33, [4958.91, 5006.84], [6548.06, 6562.82, 6583.57], [6716.440, 6730.815]],
-                 force_to_measure=True):
+                 force_to_measure=True, r_ratio=0.5):
         
         # Spectrum for the cross-correlation with absorption and emission templates
         abs_spectrum, em_spectrum = copy.deepcopy(spectrum), copy.deepcopy(spectrum)
@@ -1308,7 +1331,7 @@ class rvm:
         # and obtain the redshift measurement results for each absorption template
         template_names1 = list(self.templates1.keys())
         n_templates1 = len(template_names1)
-        z1, zerr1, r1, chi_eff1 = np.zeros(n_templates1), np.zeros(n_templates1), np.zeros(n_templates1), np.zeros(n_templates1)
+        z1, zerr1, r1, chi_eff1, note1 = np.zeros(n_templates1), np.zeros(n_templates1), np.zeros(n_templates1), np.zeros(n_templates1), np.zeros(n_templates1).astype(str)
         for i, temp_name in enumerate(template_names1):
             cc_spec_temp = cc_result(abs_spectrum, proc_spec=abs_proc_spec,
                                     template=self.templates1[temp_name], shifted_template=self.shifted_templates1[temp_name], 
@@ -1316,20 +1339,20 @@ class rvm:
                                     temp_knots_bin=self.temp_knots_bin, temp_line_thres=self.temp_line_thres, temp_resolution=self.temp_resolution,
                                     z_range=self.z_range, line_fit=line_fit,
                                     em_lines=em_lines, resolution=resolution, n_jobs=self.n_jobs,
-                                    force_to_measure=force_to_measure)
-            z1[i], zerr1[i], r1[i], chi_eff1[i] = cc_spec_temp.z, cc_spec_temp.zerr, cc_spec_temp.r, cc_spec_temp.chi_eff
+                                    force_to_measure=force_to_measure, r_ratio=r_ratio)
+            z1[i], zerr1[i], r1[i], chi_eff1[i], note1[i] = cc_spec_temp.z, cc_spec_temp.zerr, cc_spec_temp.r, cc_spec_temp.chi_eff, cc_spec_temp.note
         
         # remove the results with nan-redshift, chi_eff>chi_thres, and r<r_thres
         if chi_thres:
             nan_thres_check = (np.isfinite(zerr1))&(np.isfinite(r1))&(np.isfinite(chi_eff1))&(chi_eff1<chi_thres)&(r1>r_thres)
         else:
             nan_thres_check = (np.isfinite(zerr1))&(np.isfinite(r1))&(np.isfinite(chi_eff1))&(r1>r_thres)
-        template_names1, z1, zerr1, r1, chi_eff1 = np.array(template_names1)[nan_thres_check], z1[nan_thres_check], zerr1[nan_thres_check], r1[nan_thres_check], chi_eff1[nan_thres_check]
+        template_names1, z1, zerr1, r1, chi_eff1, note1 = np.array(template_names1)[nan_thres_check], z1[nan_thres_check], zerr1[nan_thres_check], r1[nan_thres_check], chi_eff1[nan_thres_check], note1[nan_thres_check]
         # Select the best result among absorption templates if there are any
         if len(r1):
             i_best1 = np.nanargmin(chi_eff1)
-            return (template_names1[i_best1], z1[i_best1], zerr1[i_best1], r1[i_best1], chi_eff1[i_best1])
-        
+            return (template_names1[i_best1], z1[i_best1], zerr1[i_best1], r1[i_best1], chi_eff1[i_best1], note1[i_best1])
+
         # If there is no absorption template with chi_eff<chi_thres and r>r_thres,
         # cross-correate with the emission templates
         else:
@@ -1342,7 +1365,7 @@ class rvm:
             # and obtain the redshift measurement results for each emission template
             template_names2 = list(self.templates2.keys())
             n_templates2 = len(template_names2)
-            z2, zerr2, r2, chi_eff2 = np.zeros(n_templates2), np.zeros(n_templates2), np.zeros(n_templates2), np.zeros(n_templates2)
+            z2, zerr2, r2, chi_eff2, note2 = np.zeros(n_templates2), np.zeros(n_templates2), np.zeros(n_templates2), np.zeros(n_templates2), np.zeros(n_templates2).astype(str)
             for i, temp_name in enumerate(template_names2):
                 cc_spec_temp = cc_result(em_spectrum, proc_spec=em_proc_spec, 
                                         template=self.templates2[temp_name], shifted_template=self.shifted_templates2[temp_name],
@@ -1350,30 +1373,30 @@ class rvm:
                                         temp_knots_bin=self.temp_knots_bin, temp_line_thres=self.temp_line_thres, temp_resolution=self.temp_resolution,
                                         z_range=self.z_range, line_fit=line_fit,
                                         em_lines=em_lines, resolution=resolution, n_jobs=self.n_jobs,
-                                        force_to_measure=force_to_measure)
-                z2[i], zerr2[i], r2[i], chi_eff2[i] = cc_spec_temp.z, cc_spec_temp.zerr, cc_spec_temp.r, cc_spec_temp.chi_eff
+                                        force_to_measure=force_to_measure, r_ratio=r_ratio)
+                z2[i], zerr2[i], r2[i], chi_eff2[i], note2[i] = cc_spec_temp.z, cc_spec_temp.zerr, cc_spec_temp.r, cc_spec_temp.chi_eff, cc_spec_temp.note
             
             # remove the results with nan-redshift, chi_eff>chi_thres, and r<r_thres
             if chi_thres:
                 nan_check = (np.isfinite(zerr2))&(np.isfinite(r2))&(np.isfinite(chi_eff2))&(chi_eff2<chi_thres)&(r2>r_thres)
             else:
                 nan_check = (np.isfinite(zerr2))&(np.isfinite(r2))&(np.isfinite(chi_eff2))&(r2>r_thres)
-            template_names2, z2, zerr2, r2, chi_eff2 = np.array(template_names2)[nan_check], z2[nan_check], zerr2[nan_check], r2[nan_check], chi_eff2[nan_check]
+            template_names2, z2, zerr2, r2, chi_eff2, note2 = np.array(template_names2)[nan_check], z2[nan_check], zerr2[nan_check], r2[nan_check], chi_eff2[nan_check], note2[nan_check]
                     
             # Select the best result among absorption templates if there are any
             if len(r2):
                 i_best2 = np.nanargmin(chi_eff2)
-                return (template_names2[i_best2], z2[i_best2], zerr2[i_best2], r2[i_best2], chi_eff2[i_best2])     
+                return (template_names2[i_best2], z2[i_best2], zerr2[i_best2], r2[i_best2], chi_eff2[i_best2], note2[i_best2])
             # If there is no emission template with chi_eff<chi_thres and r>r_thres,
             # set the final redshift measurement result to NaN
             else:
-                return ('No_template', -9,-9,-9,-9)
-    
+                return ('No_template', -9,-9,-9,-9, '')
+
     def z_em_abs(self, spectrum, resolution=3, chi_thres=4, r_thres=5, 
                  knots_bin=100, line_thres=3, apodization_size=0.05,
                  line_fit = True,
                  em_lines=[2798.00, 3727.30, 4861.33, [4958.91, 5006.84], [6548.06, 6562.82, 6583.57], [6716.440, 6730.815]],
-                 force_to_measure=True):
+                 force_to_measure=True, r_ratio=0.5):
         # Spectrum for the cross-correlation with absorption and emission templates
         abs_spectrum, em_spectrum = copy.deepcopy(spectrum), copy.deepcopy(spectrum)
         
@@ -1387,7 +1410,7 @@ class rvm:
         # and obtain the redshift measurement results for each emission template
         template_names2 = list(self.templates2.keys())
         n_templates2 = len(template_names2)
-        z2, zerr2, r2, chi_eff2 = np.zeros(n_templates2), np.zeros(n_templates2), np.zeros(n_templates2), np.zeros(n_templates2)
+        z2, zerr2, r2, chi_eff2, note2 = np.zeros(n_templates2), np.zeros(n_templates2), np.zeros(n_templates2), np.zeros(n_templates2), np.zeros(n_templates2).astype(str)
         for i, temp_name in enumerate(template_names2):
             cc_spec_temp = cc_result(em_spectrum, proc_spec=em_proc_spec, 
                                     template=self.templates2[temp_name], shifted_template=self.shifted_templates2[temp_name],
@@ -1395,20 +1418,20 @@ class rvm:
                                     temp_knots_bin=self.temp_knots_bin, temp_line_thres=self.temp_line_thres, temp_resolution=self.temp_resolution,
                                     z_range=self.z_range, line_fit=line_fit,
                                     em_lines=em_lines, resolution=resolution, n_jobs=self.n_jobs,
-                                    force_to_measure=force_to_measure)
-            z2[i], zerr2[i], r2[i], chi_eff2[i] = cc_spec_temp.z, cc_spec_temp.zerr, cc_spec_temp.r, cc_spec_temp.chi_eff
+                                    force_to_measure=force_to_measure, r_ratio=r_ratio)
+            z2[i], zerr2[i], r2[i], chi_eff2[i], note2[i] = cc_spec_temp.z, cc_spec_temp.zerr, cc_spec_temp.r, cc_spec_temp.chi_eff, cc_spec_temp.note
             
         # Remove the results with nan-redshift, chi_eff>chi_thres, and r<r_thres
         if chi_thres:
             nan_check = (np.isfinite(zerr2))&(np.isfinite(r2))&(np.isfinite(chi_eff2))&(chi_eff2<chi_thres)&(r2>r_thres)
         else:
             nan_check = (np.isfinite(zerr2))&(np.isfinite(r2))&(np.isfinite(chi_eff2))&(r2>r_thres)
-        template_names2, z2, zerr2, r2, chi_eff2 = np.array(template_names2)[nan_check], z2[nan_check], zerr2[nan_check], r2[nan_check], chi_eff2[nan_check]
+        template_names2, z2, zerr2, r2, chi_eff2, note2 = np.array(template_names2)[nan_check], z2[nan_check], zerr2[nan_check], r2[nan_check], chi_eff2[nan_check], note2[nan_check]
         
         # Select the best result among absorption templates if there are any
         if len(r2):
             i_best2 = np.nanargmin(chi_eff2)
-            return (template_names2[i_best2], z2[i_best2], zerr2[i_best2], r2[i_best2], chi_eff2[i_best2])
+            return (template_names2[i_best2], z2[i_best2], zerr2[i_best2], r2[i_best2], chi_eff2[i_best2], note2[i_best2])
         
         # If there is no emission template with chi_eff<chi_thres and r>r_thres,
         # cross-correate with the absorption templates   
@@ -1422,7 +1445,7 @@ class rvm:
             # and obtain the redshift measurement results for each absorption templat
             template_names1 = list(self.templates1.keys())
             n_templates1 = len(template_names1)
-            z1, zerr1, r1, chi_eff1 = np.zeros(n_templates1), np.zeros(n_templates1), np.zeros(n_templates1), np.zeros(n_templates1)
+            z1, zerr1, r1, chi_eff1, note1 = np.zeros(n_templates1), np.zeros(n_templates1), np.zeros(n_templates1), np.zeros(n_templates1), np.zeros(n_templates1).astype(str)
             for i, temp_name in enumerate(template_names1):
                 cc_spec_temp = cc_result(abs_spectrum, proc_spec=abs_proc_spec,
                                         template=self.templates1[temp_name], shifted_template=self.shifted_templates1[temp_name], 
@@ -1430,30 +1453,30 @@ class rvm:
                                         temp_knots_bin=self.temp_knots_bin, temp_line_thres=self.temp_line_thres, temp_resolution=self.temp_resolution,
                                         z_range=self.z_range, line_fit=line_fit,
                                         em_lines=em_lines, resolution=resolution, n_jobs=self.n_jobs,
-                                        force_to_measure=force_to_measure)
-                z1[i], zerr1[i], r1[i], chi_eff1[i] = cc_spec_temp.z, cc_spec_temp.zerr, cc_spec_temp.r, cc_spec_temp.chi_eff
+                                        force_to_measure=force_to_measure, r_ratio=r_ratio)
+                z1[i], zerr1[i], r1[i], chi_eff1[i], note1[i] = cc_spec_temp.z, cc_spec_temp.zerr, cc_spec_temp.r, cc_spec_temp.chi_eff, cc_spec_temp.note
             
             # Remove the results with nan-redshift, chi_eff>chi_thres, and r<r_thres
             if chi_thres:
                 nan_check = (np.isfinite(zerr1))&(np.isfinite(r1))&(np.isfinite(chi_eff1))&(chi_eff1<chi_thres)&(r1>r_thres)
             else:
                 nan_check = (np.isfinite(zerr1))&(np.isfinite(r1))&(np.isfinite(chi_eff1))&(r1>r_thres)
-            template_names1, z1, zerr1, r1, chi_eff1 = np.array(template_names1)[nan_check], z1[nan_check], zerr1[nan_check], r1[nan_check], chi_eff1[nan_check]
+            template_names1, z1, zerr1, r1, chi_eff1, note1 = np.array(template_names1)[nan_check], z1[nan_check], zerr1[nan_check], r1[nan_check], chi_eff1[nan_check], note1[nan_check]
             
             # Select the best result among absorption templates if there are any
             if len(r1):
                 i_best1 = np.nanargmin(chi_eff1)
-                return (template_names1[i_best1], z1[i_best1], zerr1[i_best1], r1[i_best1], chi_eff1[i_best1])  
+                return (template_names1[i_best1], z1[i_best1], zerr1[i_best1], r1[i_best1], chi_eff1[i_best1], note1[i_best1])  
             # If there is no emission template with chi_eff<chi_thres and r>r_thres,
             # set the final redshift measurement result to NaN
             else:
-                return ('No_template', -9,-9,-9,-9)
-            
+                return ('No_template', -9,-9,-9,-9, '')
+
     def z_all_templates(self, spectrum, prior='abs', output='all', resolution=3, chi_thres=4, r_thres=5, 
                  knots_bin=100, line_thres=3, apodization_size=0.05,
                  line_fit = True,
                  em_lines=[2798.00, 3727.30, 4861.33, [4958.91, 5006.84], [6548.06, 6562.82, 6583.57], [6716.440, 6730.815]],
-                 force_to_measure=True):
+                 force_to_measure=True, r_ratio=0.5):
         # Spectrum for the cross-correlation with absorption and emission templates
         abs_spectrum, em_spectrum = copy.deepcopy(spectrum), copy.deepcopy(spectrum)
         
@@ -1465,7 +1488,7 @@ class rvm:
         abs_spectrum[3] = abs_proc_spec.new_masks
         template_names1 = list(self.templates1.keys())
         n_templates1 = len(template_names1)
-        z1, zerr1, r1, chi_eff1 = np.zeros(n_templates1), np.zeros(n_templates1), np.zeros(n_templates1), np.zeros(n_templates1)
+        z1, zerr1, r1, chi_eff1, note1 = np.zeros(n_templates1), np.zeros(n_templates1), np.zeros(n_templates1), np.zeros(n_templates1), np.zeros(n_templates1).astype(str)
         for i, temp_name in enumerate(template_names1):
             cc_spec_temp = cc_result(abs_spectrum, proc_spec=abs_proc_spec,
                                     template=self.templates1[temp_name], shifted_template=self.shifted_templates1[temp_name], 
@@ -1473,21 +1496,21 @@ class rvm:
                                     temp_knots_bin=self.temp_knots_bin, temp_line_thres=self.temp_line_thres, temp_resolution=self.temp_resolution,
                                     z_range=self.z_range, line_fit=line_fit,
                                     em_lines=em_lines, resolution=resolution, n_jobs=self.n_jobs,
-                                    force_to_measure=force_to_measure)
+                                    force_to_measure=force_to_measure, r_ratio=r_ratio)
             self.cc_result[temp_name] = cc_spec_temp
-            z1[i], zerr1[i], r1[i], chi_eff1[i] = cc_spec_temp.z, cc_spec_temp.zerr, cc_spec_temp.r, cc_spec_temp.chi_eff
+            z1[i], zerr1[i], r1[i], chi_eff1[i], note1[i] = cc_spec_temp.z, cc_spec_temp.zerr, cc_spec_temp.r, cc_spec_temp.chi_eff, cc_spec_temp.note
                 
         # Remove the results with nan-redshift, chi_eff>chi_thres, and r<r_thres
         if chi_thres:
             nan_check = (np.isfinite(zerr1))&(np.isfinite(r1))&(np.isfinite(chi_eff1))&(chi_eff1<chi_thres)&(r1>r_thres)
         else:
             nan_check = (np.isfinite(zerr1))&(np.isfinite(r1))&(np.isfinite(chi_eff1))&(r1>r_thres)
-        template_names1, z1, zerr1, r1, chi_eff1 = np.array(template_names1)[nan_check], z1[nan_check], zerr1[nan_check], r1[nan_check], chi_eff1[nan_check]
+        template_names1, z1, zerr1, r1, chi_eff1, note1 = np.array(template_names1)[nan_check], z1[nan_check], zerr1[nan_check], r1[nan_check], chi_eff1[nan_check], note1[nan_check]
         
         # Select the best result among absorption templates if there are any
         if len(r1):
             i_best1 = np.nanargmin(chi_eff1)
-            best_templates_name1, best_z1, best_zerr1, best_r1, best_chi_eff1 = template_names1[i_best1], z1[i_best1], zerr1[i_best1], r1[i_best1], chi_eff1[i_best1]
+            best_templates_name1, best_z1, best_zerr1, best_r1, best_chi_eff1, best_note1 = template_names1[i_best1], z1[i_best1], zerr1[i_best1], r1[i_best1], chi_eff1[i_best1], note1[i_best1]
         else:
             best_r1 = np.nan
             
@@ -1497,7 +1520,7 @@ class rvm:
         em_spectrum[3] = em_proc_spec.new_masks
         template_names2 = list(self.templates2.keys())
         n_templates2 = len(template_names2)
-        z2, zerr2, r2, chi_eff2 = np.zeros(n_templates2), np.zeros(n_templates2), np.zeros(n_templates2), np.zeros(n_templates2)
+        z2, zerr2, r2, chi_eff2, note2 = np.zeros(n_templates2), np.zeros(n_templates2), np.zeros(n_templates2), np.zeros(n_templates2), np.zeros(n_templates2).astype(str)
         for i, temp_name in enumerate(template_names2):
             cc_spec_temp = cc_result(em_spectrum, proc_spec=em_proc_spec,
                                     template=self.templates2[temp_name], shifted_template=self.shifted_templates2[temp_name],
@@ -1506,21 +1529,21 @@ class rvm:
                                     z_range=self.z_range, line_fit=line_fit,
                                     em_lines=em_lines, resolution=resolution,
                                     n_jobs=self.n_jobs,
-                                    force_to_measure=force_to_measure)
+                                    force_to_measure=force_to_measure, r_ratio=r_ratio)
             self.cc_result[temp_name] = cc_spec_temp
-            z2[i], zerr2[i], r2[i], chi_eff2[i] = cc_spec_temp.z, cc_spec_temp.zerr, cc_spec_temp.r, cc_spec_temp.chi_eff
+            z2[i], zerr2[i], r2[i], chi_eff2[i], note2[i] = cc_spec_temp.z, cc_spec_temp.zerr, cc_spec_temp.r, cc_spec_temp.chi_eff, cc_spec_temp.note
                 
         # Remove the results with nan-redshift, chi_eff>chi_thres, and r<r_thres
         if chi_thres:
             nan_check = (np.isfinite(zerr2))&(np.isfinite(r2))&(np.isfinite(chi_eff2))&(chi_eff2<chi_thres)&(r2>r_thres)
         else:
             nan_check = (np.isfinite(zerr2))&(np.isfinite(r2))&(np.isfinite(chi_eff2))&(r2>r_thres)
-        template_names2, z2, zerr2, r2, chi_eff2 = np.array(template_names2)[nan_check], z2[nan_check], zerr2[nan_check], r2[nan_check], chi_eff2[nan_check]
+        template_names2, z2, zerr2, r2, chi_eff2, note2 = np.array(template_names2)[nan_check], z2[nan_check], zerr2[nan_check], r2[nan_check], chi_eff2[nan_check], note2[nan_check]
 
         # Select the best result among emission templates if there are any
         if len(r2):
             i_best2 = np.nanargmin(chi_eff2)
-            best_templates_name2, best_z2, best_zerr2, best_r2, best_chi_eff2 = template_names2[i_best2], z2[i_best2], zerr2[i_best2], r2[i_best2], chi_eff2[i_best2] 
+            best_templates_name2, best_z2, best_zerr2, best_r2, best_chi_eff2, best_note2 = template_names2[i_best2], z2[i_best2], zerr2[i_best2], r2[i_best2], chi_eff2[i_best2], note2[i_best2]
         else:
             best_r2 = np.nan
 
@@ -1544,284 +1567,30 @@ class rvm:
 
         # Concatenate the results from absorption and emission templates
         template_names, z, zerr, r, chi_eff = np.concatenate([template_names1, template_names2]), np.concatenate([z1, z2]), np.concatenate([zerr1, zerr2]), np.concatenate([r1,r2]), np.concatenate([chi_eff1, chi_eff2])
-        note = np.zeros_like(r).astype(str)
-        note[:] = ' '
+        note = np.concatenate([note1, note2])
+        best = np.zeros_like(r).astype(str)
+        best[:] = ' '
         if i_best != None:
-            note[i_best] = 'best'
-        # Arange the value in the order of chi_eff
+            best[i_best] = 'best'
+        # Arange the value in the order of r_value
         order = np.flip(np.argsort(r))
-        template_names, z, zerr, r, chi_eff, note = template_names[order], z[order], zerr[order], r[order], chi_eff[order], note[order]
+        template_names, z, zerr, r, chi_eff, best, note = template_names[order], z[order], zerr[order], r[order], chi_eff[order], best[order], note[order]
         
-        table = np.vstack((template_names, z, zerr, r, chi_eff, note))
-        column_names = ['template_name', 'z', 'zerr', 'r', 'chi_eff', 'note']
+        table = np.vstack((template_names, z, zerr, r, chi_eff, best, note))
+        column_names = ['template_name', 'z', 'zerr', 'r', 'chi_eff', 'best', 'note']
         result = pd.DataFrame(table.T, columns = column_names)
-        result = result.astype({'template_name':str, 'z':np.float32, 'zerr':np.float32, 'r':np.float32, 'chi_eff':np.float32, 'note':str})
-        
+        result = result.astype({'template_name':str, 'z':np.float32, 'zerr':np.float32, 'r':np.float32, 'chi_eff':np.float32, 'best':str, 'note':str})
+
         return result
-        
-    
-    # def z_single(self, spectrum, output='all', prior='abs', spectrum_range=None, resolution=3, chi_thres=4, mask=None, r_thres=5, 
-    #              knots_bin=100, line_thres=3, apodization_size=0.05, window_continuum=100, sn_continuum=0.5,
-    #              line_fit = True,
-    #              em_lines=[2798.00, 3727.30, 4861.33, [4958.91, 5006.84], [6548.06, 6562.82, 6583.57], [6716.440, 6730.815]]):
-        
-    #     spectrum = copy.deepcopy(spectrum)
-        
-    #     if type(spectrum_range)==type([]) or type(spectrum_range)==type(np.array([])):
-    #         if len(np.where((spectrum[0,:]>spectrum_range[0])&(spectrum[0,:]<spectrum_range[1]))[0]) ==0:
-    #             raise ValueError('spectrum_range should contain spectrum wavelengths')
-    #         spectrum = spectrum[:,(spectrum[0,:]>spectrum_range[0])&(spectrum[0,:]<spectrum_range[1])]
-        
-    #     spectrum = clean_spectrum(spectrum, window_continuum, sn_continuum)
-    #     scale = np.median(spectrum[2])
-    #     spectrum[1] /= scale
-    #     spectrum[2] /= scale
-    #     # spectrum[3,spectrum[1]/spectrum[2]<-3] = 0
-    #     if type(mask)==type([]) or type(mask)==type(np.array([])):
-    #         for i in range(len(mask)):
-    #             left_end = abs(spectrum[0,:]- mask[i][0]).argmin()
-    #             right_end = abs(spectrum[0,:] - mask[i][1]).argmin()
-    #             spectrum[3,left_end:right_end+1] = 0
-                
-    #     abs_spectrum, em_spectrum = copy.deepcopy(spectrum), copy.deepcopy(spectrum)
-        
-    #     if output=='best':
-    #         if prior == 'abs':
-    #             # absorption tempaltes
-    #             normalize = process_spectrum(abs_spectrum[0], abs_spectrum[1], np.abs(abs_spectrum[3]/abs_spectrum[2]), resolution=resolution, temp_type=1, knots_bin = knots_bin,
-    #                                         thres=line_thres, apodization_size=apodization_size)
-    #             abs_spectrum[3] = normalize.new_masks
-                
-    #             template_names1 = list(self.templates1.keys())
-    #             n_templates1 = len(template_names1)
-    #             z1, zerr1, r1, chi_eff1 = np.zeros(n_templates1), np.zeros(n_templates1), np.zeros(n_templates1), np.zeros(n_templates1)
-    #             for i, temp_name in enumerate(template_names1):
-    #                 cc_spec_temp = cc_result(abs_spectrum, proc_spec=normalize,
-    #                                         template=self.templates1[temp_name], shifted_template=self.shifted_templates1[temp_name], 
-    #                                         temp_apodization_size=self.temp_apodization_size,
-    #                                         temp_knots_bin=self.temp_knots_bin, temp_line_thres=self.temp_line_thres, temp_resolution=self.temp_resolution,
-    #                                         z_range=self.z_range, line_fit=line_fit,
-    #                                         em_lines=em_lines, resolution=resolution)
-    #                 z1[i], zerr1[i], r1[i], chi_eff1[i] = cc_spec_temp.z, cc_spec_temp.zerr, cc_spec_temp.r, cc_spec_temp.chi_eff
-                
-                
-                
-    #             # remove the results with nan-redshift
-    #             if chi_thres:
-    #                 nan_check = (np.isfinite(zerr1))&(np.isfinite(r1))&(np.isfinite(chi_eff1))&(chi_eff1<chi_thres)&(r1>r_thres)
-    #             else:
-    #                 nan_check = (np.isfinite(zerr1))&(np.isfinite(r1))&(np.isfinite(chi_eff1))&(r1>r_thres)
-    #             template_names1, z1, zerr1, r1, chi_eff1 = np.array(template_names1)[nan_check], z1[nan_check], zerr1[nan_check], r1[nan_check], chi_eff1[nan_check]
-    #             # best result among absorption templates
-    #             if len(r1):
-    #                 i_best1 = np.nanargmin(chi_eff1)
-    #                 result = (template_names1[i_best1], z1[i_best1], zerr1[i_best1], r1[i_best1], chi_eff1[i_best1])
-                    
-    #             else:
-    #                 # emission tempaltes
-    #                 normalize = process_spectrum(em_spectrum[0], em_spectrum[1], np.abs(em_spectrum[3]/em_spectrum[2]), resolution=resolution, temp_type=2, knots_bin = knots_bin,
-    #                                             thres=line_thres, apodization_size=apodization_size)
-    #                 em_spectrum[3] = normalize.new_masks
-                    
-    #                 template_names2 = list(self.templates2.keys())
-    #                 n_templates2 = len(template_names2)
-    #                 z2, zerr2, r2, chi_eff2 = np.zeros(n_templates2), np.zeros(n_templates2), np.zeros(n_templates2), np.zeros(n_templates2)
-    #                 for i, temp_name in enumerate(template_names2):
-    #                     cc_spec_temp = cc_result(em_spectrum, proc_spec=normalize, 
-    #                                             template=self.templates2[temp_name], shifted_template=self.shifted_templates2[temp_name],
-    #                                             temp_apodization_size=self.temp_apodization_size,
-    #                                             temp_knots_bin=self.temp_knots_bin, temp_line_thres=self.temp_line_thres, temp_resolution=self.temp_resolution,
-    #                                             z_range=self.z_range, line_fit=line_fit,
-    #                                             em_lines=em_lines, resolution=resolution)
-    #                 # return output
-    #                     z2[i], zerr2[i], r2[i], chi_eff2[i] = cc_spec_temp.z, cc_spec_temp.zerr, cc_spec_temp.r, cc_spec_temp.chi_eff
-                    
-    #                 # remove the results with nan-redshift
-    #                 if chi_thres:
-    #                     nan_check = (np.isfinite(zerr2))&(np.isfinite(r2))&(np.isfinite(chi_eff2))&(chi_eff2<chi_thres)&(r2>r_thres)
-    #                 else:
-    #                     nan_check = (np.isfinite(zerr2))&(np.isfinite(r2))&(np.isfinite(chi_eff2))&(r2>r_thres)
-    #                 template_names2, z2, zerr2, r2, chi_eff2 = np.array(template_names2)[nan_check], z2[nan_check], zerr2[nan_check], r2[nan_check], chi_eff2[nan_check]
-                            
-    #                 # best result among emssion templates
-    #                 if len(r2):
-    #                     i_best2 = np.nanargmin(chi_eff2)
-    #                     result = (template_names2[i_best2], z2[i_best2], zerr2[i_best2], r2[i_best2], chi_eff2[i_best2])     
-    #                 else:
-    #                     result = ('No_template', -9,-9,-9,-9)
-                        
-    #         if prior == 'em':
-    #             # emission tempaltes
-    #             normalize = process_spectrum(em_spectrum[0], em_spectrum[1], np.abs(em_spectrum[3]/em_spectrum[2]), resolution=resolution, temp_type=2, knots_bin = knots_bin,
-    #                                         thres=line_thres, apodization_size=apodization_size)
-    #             em_spectrum[3] = normalize.new_masks
-                
-    #             template_names2 = list(self.templates2.keys())
-    #             n_templates2 = len(template_names2)
-    #             z2, zerr2, r2, chi_eff2 = np.zeros(n_templates2), np.zeros(n_templates2), np.zeros(n_templates2), np.zeros(n_templates2)
-    #             for i, temp_name in enumerate(template_names2):
-    #                 cc_spec_temp = cc_result(em_spectrum, normalize=normalize, proc_spec=normalize, 
-    #                                         template=self.templates2[temp_name], shifted_template=self.shifted_templates2[temp_name],
-    #                                         temp_apodization_size=self.temp_apodization_size,
-    #                                         temp_knots_bin=self.temp_knots_bin, temp_line_thres=self.temp_line_thres, temp_resolution=self.temp_resolution,
-    #                                         z_range=self.z_range, line_fit=line_fit,
-    #                                         em_lines=em_lines, resolution=resolution)
-    #             # return output
-    #                 z2[i], zerr2[i], r2[i], chi_eff2[i] = cc_spec_temp.z, cc_spec_temp.zerr, cc_spec_temp.r, cc_spec_temp.chi_eff
-                    
-    #             # remove the results with nan-redshift
-    #             if chi_thres:
-    #                 nan_check = (np.isfinite(zerr2))&(np.isfinite(r2))&(np.isfinite(chi_eff2))&(chi_eff2<chi_thres)&(r2>r_thres)
-    #             else:
-    #                 nan_check = (np.isfinite(zerr2))&(np.isfinite(r2))&(np.isfinite(chi_eff2))&(r2>r_thres)
-    #             template_names2, z2, zerr2, r2, chi_eff2 = np.array(template_names2)[nan_check], z2[nan_check], zerr2[nan_check], r2[nan_check], chi_eff2[nan_check]
-                
-    #             # best result among emssion templates
-    #             if len(r2):
-    #                 i_best2 = np.nanargmin(chi_eff2)
-    #                 result = (template_names2[i_best2], z2[i_best2], zerr2[i_best2], r2[i_best2], chi_eff2[i_best2])
-                    
-    #             else:
-    #                 # absorption tempaltes
-    #                 normalize = process_spectrum(abs_spectrum[0], abs_spectrum[1], np.abs(abs_spectrum[3]/abs_spectrum[2]), resolution=resolution, temp_type=1, knots_bin = knots_bin,
-    #                                             thres=line_thres, apodization_size=apodization_size)
-    #                 abs_spectrum[3] = normalize.new_masks
-                    
-    #                 template_names1 = list(self.templates1.keys())
-    #                 n_templates1 = len(template_names1)
-    #                 z1, zerr1, r1, chi_eff1 = np.zeros(n_templates1), np.zeros(n_templates1), np.zeros(n_templates1), np.zeros(n_templates1)
-    #                 for i, temp_name in enumerate(template_names1):
-    #                     cc_spec_temp = cc_result(abs_spectrum, proc_spec=normalize,
-    #                                             template=self.templates1[temp_name], shifted_template=self.shifted_templates1[temp_name], 
-    #                                             temp_apodization_size=self.temp_apodization_size,
-    #                                             temp_knots_bin=self.temp_knots_bin, temp_line_thres=self.temp_line_thres, temp_resolution=self.temp_resolution,
-    #                                             z_range=self.z_range, line_fit=line_fit,
-    #                                             em_lines=em_lines, resolution=resolution)
-    #                     z1[i], zerr1[i], r1[i], chi_eff1[i] = cc_spec_temp.z, cc_spec_temp.zerr, cc_spec_temp.r, cc_spec_temp.chi_eff
-                    
-    #                 # remove the results with nan-redshift
-    #                 if chi_thres:
-    #                     nan_check = (np.isfinite(zerr1))&(np.isfinite(r1))&(np.isfinite(chi_eff1))&(chi_eff1<chi_thres)&(r1>r_thres)
-    #                 else:
-    #                     nan_check = (np.isfinite(zerr1))&(np.isfinite(r1))&(np.isfinite(chi_eff1))&(r1>r_thres)
-    #                 template_names1, z1, zerr1, r1, chi_eff1 = np.array(template_names1)[nan_check], z1[nan_check], zerr1[nan_check], r1[nan_check], chi_eff1[nan_check]
-    #                 # best result among absorption templates
-    #                 if len(r1):
-    #                     i_best1 = np.nanargmax(chi_eff1)
-    #                     result = (template_names1[i_best1], z1[i_best1], zerr1[i_best1], r1[i_best1], chi_eff1[i_best1])  
-    #                 else:
-    #                     result = ('No_template', -9,-9,-9,-9)
-                    
-    #     elif output=='all':
-    #         self.cc_result = {}
-    #         # absorption tempaltes
-    #         normalize = process_spectrum(abs_spectrum[0], abs_spectrum[1], np.abs(abs_spectrum[3]/abs_spectrum[2]), resolution=resolution, temp_type=1, knots_bin = knots_bin,
-    #                                     thres=line_thres, apodization_size=apodization_size)
-    #         abs_spectrum[3] = normalize.new_masks
-            
-    #         template_names1 = list(self.templates1.keys())
-    #         n_templates1 = len(template_names1)
-    #         z1, zerr1, r1, chi_eff1 = np.zeros(n_templates1), np.zeros(n_templates1), np.zeros(n_templates1), np.zeros(n_templates1)
-    #         for i, temp_name in enumerate(template_names1):
-    #             cc_spec_temp = cc_result(abs_spectrum, proc_spec=normalize,
-    #                                     template=self.templates1[temp_name], shifted_template=self.shifted_templates1[temp_name], 
-    #                                     temp_apodization_size=self.temp_apodization_size,
-    #                                     temp_knots_bin=self.temp_knots_bin, temp_line_thres=self.temp_line_thres, temp_resolution=self.temp_resolution,
-    #                                     z_range=self.z_range, line_fit=line_fit,
-    #                                     em_lines=em_lines, resolution=resolution)
-    #             self.cc_result[temp_name] = cc_spec_temp
-    #             z1[i], zerr1[i], r1[i], chi_eff1[i] = cc_spec_temp.z, cc_spec_temp.zerr, cc_spec_temp.r, cc_spec_temp.chi_eff
-                    
-    #         # remove the results with nan-redshift
-    #         if chi_thres:
-    #             nan_check = (np.isfinite(zerr1))&(np.isfinite(r1))&(np.isfinite(chi_eff1))&(chi_eff1<chi_thres)&(r1>r_thres)
-    #         else:
-    #             nan_check = (np.isfinite(zerr1))&(np.isfinite(r1))&(np.isfinite(chi_eff1))&(r1>r_thres)
-    #         template_names1, z1, zerr1, r1, chi_eff1 = np.array(template_names1)[nan_check], z1[nan_check], zerr1[nan_check], r1[nan_check], chi_eff1[nan_check]
-            
-    #         # best result among absorption templates
-    #         if len(r1):
-    #             i_best1 = np.nanargmin(chi_eff1)
-    #             best_templates_name1, best_z1, best_zerr1, best_r1, best_chi_eff1 = template_names1[i_best1], z1[i_best1], zerr1[i_best1], r1[i_best1], chi_eff1[i_best1]
-    #         else:
-    #             best_r1 = np.nan
-                
-    #         # emission tempaltes
-    #         normalize = process_spectrum(em_spectrum[0], em_spectrum[1], np.abs(em_spectrum[3]/em_spectrum[2]), resolution=resolution, temp_type=2, knots_bin = knots_bin,
-    #                                     thres=line_thres, apodization_size=apodization_size)
-    #         em_spectrum[3] = normalize.new_masks
-            
-    #         template_names2 = list(self.templates2.keys())
-    #         n_templates2 = len(template_names2)
-    #         z2, zerr2, r2, chi_eff2 = np.zeros(n_templates2), np.zeros(n_templates2), np.zeros(n_templates2), np.zeros(n_templates2)
-    #         for i, temp_name in enumerate(template_names2):
-    #             cc_spec_temp = cc_result(em_spectrum, proc_spec=normalize,
-    #                                     template=self.templates2[temp_name], shifted_template=self.shifted_templates2[temp_name],
-    #                                     temp_apodization_size=self.temp_apodization_size,
-    #                                     temp_knots_bin=self.temp_knots_bin, temp_line_thres=self.temp_line_thres, temp_resolution=self.temp_resolution,
-    #                                     z_range=self.z_range, line_fit=line_fit,
-    #                                     em_lines=em_lines, resolution=resolution)
-    #             self.cc_result[temp_name] = cc_spec_temp
-    #             z2[i], zerr2[i], r2[i], chi_eff2[i] = cc_spec_temp.z, cc_spec_temp.zerr, cc_spec_temp.r, cc_spec_temp.chi_eff
-                    
-    #         # remove the results with nan-redshift
-    #         if chi_thres:
-    #             nan_check = (np.isfinite(zerr2))&(np.isfinite(r2))&(np.isfinite(chi_eff2))&(chi_eff2<chi_thres)&(r2>r_thres)
-    #         else:
-    #             nan_check = (np.isfinite(zerr2))&(np.isfinite(r2))&(np.isfinite(chi_eff2))&(r2>r_thres)
-    #         template_names2, z2, zerr2, r2, chi_eff2 = np.array(template_names2)[nan_check], z2[nan_check], zerr2[nan_check], r2[nan_check], chi_eff2[nan_check]
-
-    #         # best result among absorption templates
-    #         if len(r2):
-    #             i_best2 = np.nanargmin(chi_eff2)
-    #             best_templates_name2, best_z2, best_zerr2, best_r2, best_chi_eff2 = template_names2[i_best2], z2[i_best2], zerr2[i_best2], r2[i_best2], chi_eff2[i_best2] 
-    #         else:
-    #             best_r2 = np.nan
-
-    #         # choose the best result
-    #         if prior=='abs':
-    #             if np.isfinite(best_r1):
-    #                 i_best = i_best1
-    #             else:
-    #                 if np.isfinite(best_r2):
-    #                     i_best = i_best2 + len(r1)
-    #                 else:
-    #                     i_best = None
-    #         elif prior=='em':
-    #             if np.isfinite(best_r2):
-    #                 i_best = i_best2+len(r1)
-    #             else:
-    #                 if np.isfinite(best_r1):
-    #                     i_best = i_best1
-    #                 else:
-    #                     i_best = None
-
-    #         # concatenate the results from absorption and emission templates
-    #         template_names, z, zerr, r, chi_eff = np.concatenate([template_names1, template_names2]), np.concatenate([z1, z2]), np.concatenate([zerr1, zerr2]), np.concatenate([r1,r2]), np.concatenate([chi_eff1, chi_eff2])
-    #         note = np.zeros_like(r).astype(str)
-    #         note[:] = ' '
-    #         if i_best != None:
-    #             note[i_best] = 'best'
-    #         # arange the value in the order of chi_eff
-    #         order = np.flip(np.argsort(r))
-    #         template_names, z, zerr, r, chi_eff, note = template_names[order], z[order], zerr[order], r[order], chi_eff[order], note[order]
-            
-    #         table = np.vstack((template_names, z, zerr, r, chi_eff, note))
-    #         column_names = ['template_name', 'z', 'zerr', 'r', 'chi_eff', 'note']
-    #         result = pd.DataFrame(table.T, columns = column_names)
-    #         result = result.astype({'template_name':str, 'z':np.float32, 'zerr':np.float32, 'r':np.float32, 'chi_eff':np.float32, 'note':str})
-            
-
-    #     return result
 
     def z_speclist(self, spectrums, **kw4z_single):  
         spec_number = np.arange(len(spectrums))
         result = []
         for index in tqdm(spec_number, leave=False):
-            singe_result = self.z_single(spectrums[index], output='best', **kw4z_single)
-            result.append(singe_result)
-        result = pd.DataFrame(result, columns=['best_template', 'z', 'zerr', 'r', 'chi_eff'])
-        result.astype({'best_template':str, 'z':np.float32, 'zerr':np.float32, 'r':np.float32, 'chi_eff':np.float32})
+            single_result = self.z_single(spectrums[index], output='best', **kw4z_single)
+            result.append(single_result)
+        result = pd.DataFrame(result, columns=['best_template', 'z', 'zerr', 'r', 'chi_eff', 'note'])
+        result.astype({'best_template':str, 'z':np.float32, 'zerr':np.float32, 'r':np.float32, 'chi_eff':np.float32, 'note':str})
         return result
     
     def z_multi(self, spec_files, spec_import, chunk=5000, directory=None, **kw4z_speclist):
